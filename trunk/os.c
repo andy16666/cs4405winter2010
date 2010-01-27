@@ -18,6 +18,15 @@ int PPP[];
 /* Maximum CPU time in msec for each process */
 int PPPMax[];
 
+/* Process Table */ 
+unsigned int PNum; 
+unsigned int PName[MAXPROCESS];
+unsigned int PSP[MAXPROCESS];
+unsigned int PLevel[MAXPROCESS];
+unsigned int PPC[MAXPROCESS];
+
+char StackSpace[MAXPROCESS * WORKSPACE];
+
 /* Have we been initialized? */
 BOOL init_done = FALSE;
 BOOL start_done = FALSE;
@@ -37,6 +46,8 @@ OS_Init()
 	/* Only allow init once */
 	if(FALSE == init_done)
 	{
+		PNum = 0;
+
 		/* Sacrifice 3 goats and a virgin camel to initialize the OS */
 
 		/* Flag that we've made the requisite sacrifices and appeased the gods */
@@ -80,6 +91,10 @@ PID
 OS_Create(void (*f)(void), int arg, unsigned int level, unsigned int n)
 {
 	/* Well, when a kernel and a process really love each other... */
+	PName[PNum] = n;
+	PSP[PNum] = (&StackSpace) + (WORKSPACE + (PNum + 1));
+
+	PNum++;
 }
 
 /*
