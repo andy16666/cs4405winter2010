@@ -40,16 +40,14 @@ unsigned int SpoPNext;
 unsigned int PCount;               /* Current number of processes in the system. */
 unsigned int PName  [MAXPROCESS];  /* Names of processes */ 
 unsigned int PLevel [MAXPROCESS];  /* Scheduling levels of processes */ 
-/*unsigned int PArg   [MAXPROCESS]; */
+int PArg [MAXPROCESS];             /* Arguments passed to processes */ 
 BOOL PTerminated[MAXPROCESS]; 
 char *PSP [MAXPROCESS]; 
 void(*PPC [MAXPROCESS])(void); 
 
 
-
-/* Last Process to run */ 
-PID PLast; 
-PID PNext; 
+PID PLast; /* Last Process to run */ 
+PID PNext; /* Next Process to run */
 
 /* Stack Space */
 char StackSpace[MAXPROCESS*WORKSPACE]; 
@@ -81,6 +79,8 @@ OS_Init()
 	DevPCount = 0; 
 	SpoPCount = 0; 
 	SpoPNext  = 0; 
+	PLast     = INVALIDPID; 
+	PNext     = INVALIDPID; 
 }
  
 /* Actually start the OS */
@@ -89,7 +89,7 @@ OS_Start()
 {
 
 	while(1) {
-		/* schedule processes */
+		/* Schedule processes */
 	} 
 }
  
@@ -114,19 +114,27 @@ OS_Abort()
 PID
 OS_Create(void (*f)(void), int arg, unsigned int level, unsigned int n)
 {
-	PName  [PCount] = n; 
-	PLevel [PCount] = level;
-	PTerminated [PCount] = FALSE; 
-	/* Set the stack pointer to the last address in the workspace. */ 
-	PSP [PCount]   = (char*)((&StackSpace)+(WORKSPACE*(PCount+1))-1); 
-	PPC [PCount]   = &f;
+	PID pid; 
 
+	pid = PCount+1; 
+
+	PName       [pid-1] = n; 
+	PLevel      [pid-1] = level;
+	PArg        [pid-1] = arg;
+	PTerminated [pid-1] = FALSE; 
+	
+	/* Set the stack pointer to the last address in the workspace. */ 
+	PSP [pid-1]   = (char*)((&StackSpace)+(WORKSPACE*pid)-1); 
+	PPC [pid-1]   = &f;
+
+	/* Add Sporatic Processes to the Sporatic Queue */ 
 	if (level == SPORATIC) {
-		SpoP[SpoPCount] = PCount+1; 
+		SpoP[SpoPCount] = pid; 
 		SpoPCount++; 
 	}
+	/* Add Device Processes to the Device Queue */ 
 	else if (level == DEVICE) {
-		DevP[DevPCount] = PCount+1; 
+		DevP[DevPCount] = pid; 
 		DevPRate[DevPCount] = n; 
 		DevPCount++; 
 	}
@@ -137,10 +145,14 @@ OS_Create(void (*f)(void), int arg, unsigned int level, unsigned int n)
 * End a process.
 */
 void 
-OS_Terminate() 
-{
-	PTerminated[PLast] = TRUE; 	
+OS_Terminate() {
+	PTerminated[PLast-1] = TRUE; 	
 } 
+
+void 
+OS_GetParam() {
+	return PArg[PLast-1]; 
+}
 
 void 
 Idle () {
