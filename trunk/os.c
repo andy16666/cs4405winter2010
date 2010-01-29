@@ -10,44 +10,40 @@
  
 #include "os.h"
 
+/* 
+  Process Table 
+*/
+struct process {
+	PID PID;  	     /* Process ID. */ 
+	unsigned int Name;   /* Name of process */ 
+	unsigned int Level;  /* Scheduling level/queue */ 
+	int Arg;             /* Process argument */ 
+	char *SP; 
+	void(*PC)(void);
+};
+
+process P[MAXPROCESS];        /* Main process table. */ 
+
+process *PLast; /* Last Process to run */ 
+process *PNext; /* Next Process to run */
+
 /*
   Periodic Process Queue
 */ 
-/* Maximum of 16 periodic processes allowed to be in queue */
-int PPPLen;
-/* The queue for periodic scheduling */
-int PPP[];
-/* Maximum CPU time in msec for each process */
-int PPPMax[];
+int PPPLen;   /* Maximum of 16 periodic processes allowed to be in queue */
+int PPP[];    /* The queue for periodic scheduling */
+int PPPMax[]; /* Maximum CPU time in msec for each process */
 
 /*
   Device Process Queue 
 */ 
-PID DevP[MAXPROCESS]; 
-unsigned int DevPCount; 
-unsigned int DevPRate[MAXPROCESS]; 
+process *DevP[MAXPROCESS]; 
 
 /* 
   Sproatic Process Queue
 */ 
-PID SpoP[MAXPROCESS]
-unsigned int SpoPCount; 
-unsigned int SpoPNext; 
-
-/* 
-  Process Table 
-*/
-unsigned int PCount;               /* Current number of processes in the system. */
-unsigned int PName  [MAXPROCESS];  /* Names of processes */ 
-unsigned int PLevel [MAXPROCESS];  /* Scheduling levels of processes */ 
-int PArg [MAXPROCESS];             /* Arguments passed to processes */ 
-BOOL PTerminated[MAXPROCESS]; 
-char *PSP [MAXPROCESS]; 
-void(*PPC [MAXPROCESS])(void); 
-
-
-PID PLast; /* Last Process to run */ 
-PID PNext; /* Next Process to run */
+process *SpoP[MAXPROCESS]; 
+process *SpoPNext; 
 
 /* Stack Space */
 char StackSpace[MAXPROCESS*WORKSPACE]; 
@@ -74,13 +70,25 @@ main(int argc, char** argv)
 /* Initialize the OS */
 void
 OS_Init()
-{
-	PCount    = 0; 
-	DevPCount = 0; 
-	SpoPCount = 0; 
+{	int i; 
+	process *p; 
+
 	SpoPNext  = 0; 
 	PLast     = INVALIDPID; 
 	PNext     = INVALIDPID; 
+
+	for (i = 0; i < MAXPROCESS; i++) {
+		p = &P[i]; 
+		p->PID = INVALIDPID; 
+	}	
+	/* Fill DevP[] with null pointers. */ 
+	for (i = 0; i < MAXPROCESS; i++) {
+		DevP[i] = 0;
+	}
+	/* Fill SpoP[] with null pointers. */ 
+	for (i = 0; i < MAXPROCESS; i++) {
+		SpoP[i] = 0;
+	}
 }
  
 /* Actually start the OS */
@@ -89,6 +97,10 @@ OS_Start()
 {
 
 	while(1) {
+		/* Check queues and find the next process to run. */ 
+	
+		
+
 		/* Schedule processes */
 	} 
 }
@@ -113,32 +125,36 @@ OS_Abort()
 */
 PID
 OS_Create(void (*f)(void), int arg, unsigned int level, unsigned int n)
-{
-	PID pid; 
+{	process *p; 
+	int i; 
+	
+	/* Find an available process control block */ 
+	for (i = 0; i < MAXPROCESS; i++) { 
+		p = &P[i];
+		if (p->PID == INVALIDPID) {
+			p->PID = i+1; 		
+			break; 
+		}
+	} 
 
-	pid = PCount+1; 
-
-	PName       [pid-1] = n; 
-	PLevel      [pid-1] = level;
-	PArg        [pid-1] = arg;
-	PTerminated [pid-1] = FALSE; 
+	p->Name       = n; 
+	p->Level      = level;
+	p->Arg        = arg;
 	
 	/* Set the stack pointer to the last address in the workspace. */ 
-	PSP [pid-1]   = (char*)((&StackSpace)+(WORKSPACE*pid)-1); 
-	PPC [pid-1]   = &f;
+	p->SP = (char*)((&StackSpace)+(WORKSPACE*(p->PID))-1); 
+	/* Set the initial program counter to the address of the function representing the process. */ 
+	p->PC = &f;
 
 	/* Add Sporatic Processes to the Sporatic Queue */ 
-	if (level == SPORATIC) {
-		SpoP[SpoPCount] = pid; 
-		SpoPCount++; 
+	if (p->level == SPORATIC) {
+		SpoP[p->PID-1] = &p; 
 	}
 	/* Add Device Processes to the Device Queue */ 
-	else if (level == DEVICE) {
-		DevP[DevPCount] = pid; 
-		DevPRate[DevPCount] = n; 
-		DevPCount++; 
+	else if (p->level == DEVICE) {
+		DevP[p->PID-1] = &p; 
 	}
-	PCount++; 
+	
 }
  
 /*
@@ -146,12 +162,14 @@ OS_Create(void (*f)(void), int arg, unsigned int level, unsigned int n)
 */
 void 
 OS_Terminate() {
-	PTerminated[PLast-1] = TRUE; 	
+	PLast->PID        = INVALIDPID;
+
+	/* Remove from queues */ 	
 } 
 
-void 
+int
 OS_GetParam() {
-	return PArg[PLast-1]; 
+	return PLast->Arg; 
 }
 
 void 
