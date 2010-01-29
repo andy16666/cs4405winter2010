@@ -71,15 +71,13 @@ main(int argc, char** argv)
 void
 OS_Init()
 {	int i; 
-	process *p; 
 
 	SpoPNext  = 0; 
 	PLast     = INVALIDPID; 
 	PNext     = INVALIDPID; 
-
+	
 	for (i = 0; i < MAXPROCESS; i++) {
-		p = &P[i]; 
-		p->PID = INVALIDPID; 
+		P[i]->PID = INVALIDPID; 
 	}	
 	/* Fill DevP[] with null pointers. */ 
 	for (i = 0; i < MAXPROCESS; i++) {
@@ -155,6 +153,7 @@ OS_Create(void (*f)(void), int arg, unsigned int level, unsigned int n)
 		DevP[p->PID-1] = &p; 
 	}
 	
+	return p->PID; 
 }
  
 /*
@@ -162,9 +161,9 @@ OS_Create(void (*f)(void), int arg, unsigned int level, unsigned int n)
 */
 void 
 OS_Terminate() {
-	PLast->PID        = INVALIDPID;
+	PLast->PID = INVALIDPID;
 
-	/* Remove from queues */ 	
+	/* Remove from queues */
 } 
 
 int
