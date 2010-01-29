@@ -19,19 +19,20 @@ typedef struct proc_str {
 	PID PID;  	     /* Process ID. */ 
 	unsigned int Name;   /* Name of process */ 
 	unsigned int Level;  /* Scheduling level/queue */ 
-	int Arg;             /* Process argument */ 
+	int  Arg;            /* Process argument */ 
 	char *SP; 
 	void(*PC)(void);
 	proc_str* QueuePrev;
 	proc_str* QueueNext;
-	proc_str* Prev;
-	proc_str* Next;
+
 } process;
 
 process P[MAXPROCESS];        /* Main process table. */ 
 
 process *PLast; /* Last Process to run */ 
 process *PNext; /* Next Process to run */
+
+process PSupervisor; 
 
 /*
   Periodic Process Queue
@@ -54,7 +55,7 @@ process *SpoP;
 char StackSpace[MAXPROCESS*WORKSPACE]; 
 /* FIFOs */
 fifo_t Fifos[MAXFIFO];
- 
+
 /* 
   Kernel entry point 
 */
@@ -83,7 +84,13 @@ OS_Init()
 	
 	for (i = 0; i < MAXPROCESS; i++) {
 		P[i]->PID = INVALIDPID; 
+		P[i]->QueuePrev = 0; 
+		P[i]->QueueNext = 0; 
 	}	
+	for (i = 0; i < MAXFIFO; i++) {
+		Fifos[i]->fid = INVALIDFIFO; 
+	}	
+	
 	DevP = 0;
 	SpoP = 0;
 }
@@ -96,9 +103,21 @@ OS_Start()
 	while(1) {
 		/* Check queues and find the next process to run. */ 
 	
+	
+		
+		
+		
 		
 
-		/* Schedule processes */
+		/* Schedule processes:
+				1. Check for devide process ready to run. 
+				OR Check for a PERIODIC process ready to run. 
+				OR Check for a SPORATIC process ready to run. 
+			
+				2. Schedule it. 
+		
+				3. 
+		*/
 	} 
 }
  
@@ -144,17 +163,15 @@ OS_Create(void (*f)(void), int arg, unsigned int level, unsigned int n)
 	p->PC = &f;
 
 	/* Add Sporatic Processes to the Sporatic Queue */ 
-	if (p->level == SPORATIC) {
-		SpoP[p->PID-1] = &p; 
-	}
+	if      (p->level == SPORATIC) { SpoP = QueueAdd(p, SpoP); }
 	/* Add Device Processes to the Device Queue */ 
-	else if (p->level == DEVICE) {
-		DevP[p->PID-1] = &p; 
-	}
+	else if (p->level == DEVICE)   { DevP = QueueAdd(p, DevP); }
 	
 	return p->PID; 
 }
  
+ 
+
 /*
 * End a process.
 */
@@ -162,7 +179,10 @@ void
 OS_Terminate() {
 	PLast->PID = INVALIDPID;
 
-	/* Remove from queues */
+	if      (PLast->level == SPORATIC) SpoP = QueueRemove(PLast, SpoP); 
+	else if (PLast->level == DEVICE)   DevP = QueueRemove(PLast, DevP); 
+	
+	/* Release Semiphores/FIFOS */ 
 	
 	OS_Yield();
 } 
@@ -175,4 +195,32 @@ OS_GetParam() {
 void 
 Idle () {
 	while (1); 
+}
+
+process *QueueAdd(process *p, process *Queue) {
+	if (Queue) {
+		if (Queue->QueueNext && Queue->QueuePrev) {
+			p->QueuePrev = Queue->QueuePrev; 
+			p->QueueNext = Queue; 
+			Queue->QueuePrev->QueueNext = p; 
+			Queue->QueuePrev = p; 
+		} else {
+			Queue->QueueNext = p 
+			Queue->QueuePrev = p
+		}
+	} else { 
+		Queue = &p; 
+	} 
+	return Queue; 
+}
+
+process *QueueRemove(process *p, process *Queue) {
+	if (Queue) { 
+		p->QueuePrev->QueueNext = p->QueueNext; 
+		p->QueueNext->QueuePrev = p->QueuePrev; 
+		if (Queue == p) {
+			Queue = p->QueueNext; 
+		}
+	}
+	return Queue; 
 }
