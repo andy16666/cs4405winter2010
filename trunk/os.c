@@ -1,14 +1,16 @@
 /*
-* os.c
-* Core operating system kernel code. Designed for the Rug Warrior
-* robot with the HC11 CPU.
-*
-* Authors: 
-*	Joel Goguen <r1hh8@unb.ca>
-*	Andrew Somerville <z19ar@unb.ca>
-*/
+ * os.c
+ * Core operating system kernel code. Designed for the Rug Warrior
+ * robot with the HC11 CPU.
+ *
+ * Authors: 
+ *	Joel Goguen <r1hh8@unb.ca>
+ *	Andrew Somerville <z19ar@unb.ca>
+ */
  
 #include "os.h"
+#include "process.h"
+#include "fifo.h"
 
 /* 
   Process Table 
@@ -51,9 +53,7 @@ process *SpoP;
 /* Stack Space */
 char StackSpace[MAXPROCESS*WORKSPACE]; 
 /* FIFOs */
-char FIFOs[MAXFIFO][FIFOSIZE]; 
-
-
+fifo_t Fifos[MAXFIFO];
  
 /* 
   Kernel entry point 
