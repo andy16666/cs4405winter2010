@@ -13,14 +13,18 @@
 /* 
   Process Table 
 */
-struct process {
+typedef struct proc_str {
 	PID PID;  	     /* Process ID. */ 
 	unsigned int Name;   /* Name of process */ 
 	unsigned int Level;  /* Scheduling level/queue */ 
 	int Arg;             /* Process argument */ 
 	char *SP; 
 	void(*PC)(void);
-};
+	proc_str* QueuePrev;
+	proc_str* QueueNext;
+	proc_str* Prev;
+	proc_str* Next;
+} process;
 
 process P[MAXPROCESS];        /* Main process table. */ 
 
@@ -37,13 +41,12 @@ int PPPMax[]; /* Maximum CPU time in msec for each process */
 /*
   Device Process Queue 
 */ 
-process *DevP[MAXPROCESS]; 
+process *DevP; 
 
 /* 
   Sproatic Process Queue
 */ 
-process *SpoP[MAXPROCESS]; 
-process *SpoPNext; 
+process *SpoP;
 
 /* Stack Space */
 char StackSpace[MAXPROCESS*WORKSPACE]; 
@@ -64,6 +67,8 @@ main(int argc, char** argv)
 	PPP    = {IDLE}; 
 	PPPMax = {10  }; 
 
+	/* Create processes here */
+	
 	OS_Start(); 
 }
  
@@ -79,14 +84,8 @@ OS_Init()
 	for (i = 0; i < MAXPROCESS; i++) {
 		P[i]->PID = INVALIDPID; 
 	}	
-	/* Fill DevP[] with null pointers. */ 
-	for (i = 0; i < MAXPROCESS; i++) {
-		DevP[i] = 0;
-	}
-	/* Fill SpoP[] with null pointers. */ 
-	for (i = 0; i < MAXPROCESS; i++) {
-		SpoP[i] = 0;
-	}
+	DevP = 0;
+	SpoP = 0;
 }
  
 /* Actually start the OS */
@@ -164,6 +163,8 @@ OS_Terminate() {
 	PLast->PID = INVALIDPID;
 
 	/* Remove from queues */
+	
+	OS_Yield();
 } 
 
 int
