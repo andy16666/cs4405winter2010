@@ -55,8 +55,8 @@ char StackSpace[MAXPROCESS*WORKSPACE];
 /* FIFOs */
 fifo_t Fifos[MAXFIFO];
 
-/* Gets incremented by an interrupt every x ms. */ 
-unsigned long long Clock;
+/* Gets incremented by an interrupt every x ms. NEVER READ WITH INTERRUPTS ENABLED */ 
+volatile unsigned long long Clock;
 void ClockTick(void) __attribute__((interrupt)); /* http://www.gnu-m68hc11.org/wiki/index.php/Doc:compiler */ 
 
 
@@ -65,8 +65,7 @@ void ClockTick(void) __attribute__((interrupt)); /* http://www.gnu-m68hc11.org/w
 */
 void
 main(int argc, char** argv)
-{
-	OS_Init();
+{	OS_Init();
 	
 	PPPLen = 1; 
 	PPP    = {IDLE}; 
@@ -117,15 +116,12 @@ OS_Start()
 				OR Check for a SPORATIC process ready to run. 
 			
 				2. Schedule it. 
-		
-				3. 
 		*/
 	} 
 }
  
 void
-OS_Abort()
-{
+OS_Abort() {
 	/* Kill those lesser peons and then shoot ourselves in the foot */
 }
  
@@ -142,10 +138,11 @@ OS_Abort()
 * The PID of the new process.
 */
 PID
-OS_Create(void (*f)(void), int arg, unsigned int level, unsigned int n)
-{	process *p; 
+OS_Create(void (*f)(void), int arg, unsigned int level, unsigned int n) {	
+	process *p; 
 	int i; 
 	
+	OS_DI(); 
 	/* Find an available process control block */ 
 	for (i = 0; i < MAXPROCESS; i++) { 
 		p = &P[i];
@@ -179,19 +176,18 @@ OS_Create(void (*f)(void), int arg, unsigned int level, unsigned int n)
 */
 void 
 OS_Terminate() {
+	OS_DI(); 
 	PLast->pid = INVALIDPID;
 
 	if      (PLast->level == SPORATIC) { SpoP = QueueRemove(PLast, SpoP); } 
 	else if (PLast->level == DEVICE)   { DevP = QueueRemove(PLast, DevP); }
 	
 	/* Release Semiphores/FIFOS */ 
-	
 	OS_Yield();
 } 
 
 void 
 OS_Yield() {
-	/* Restore control to the kernel */ 
 }
 
 int
@@ -256,5 +252,7 @@ QueueRemove(process *p, process *Queue) {
 /* Increments clock. Run by an interrupt every x ms. */ 
 void 
 ClockTick(void) {
+	OS_DI(); 
 	Clock++; 
+	OS_EI(); 
 }
