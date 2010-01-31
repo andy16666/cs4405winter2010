@@ -16,7 +16,7 @@
   Process Table 
 */
 typedef struct proc_str {
-	PID PID;  	     /* Process ID. */ 
+	PID pid;  	     /* Process ID. */ 
 	unsigned int Name;   /* Name of process */ 
 	unsigned int Level;  /* Scheduling level/queue */ 
 	int  Arg;            /* Process argument */ 
@@ -24,7 +24,6 @@ typedef struct proc_str {
 	void(*PC)(void);
 	proc_str* QueuePrev;
 	proc_str* QueueNext;
-
 } process;
 
 process P[MAXPROCESS];        /* Main process table. */ 
@@ -32,7 +31,7 @@ process P[MAXPROCESS];        /* Main process table. */
 process *PLast; /* Last Process to run */ 
 process *PNext; /* Next Process to run */
 
-process PSupervisor; 
+process PSupervisor;
 
 /*
   Periodic Process Queue
@@ -56,6 +55,11 @@ char StackSpace[MAXPROCESS*WORKSPACE];
 /* FIFOs */
 fifo_t Fifos[MAXFIFO];
 
+/* Gets incremented by an interrupt every x ms. */ 
+unsigned long long Clock;
+void ClockTick(void) __attribute__((interrupt)); /* http://www.gnu-m68hc11.org/wiki/index.php/Doc:compiler */ 
+
+
 /* 
   Kernel entry point 
 */
@@ -78,12 +82,11 @@ void
 OS_Init()
 {	int i; 
 
-	SpoPNext  = 0; 
 	PLast     = INVALIDPID; 
 	PNext     = INVALIDPID; 
 	
 	for (i = 0; i < MAXPROCESS; i++) {
-		P[i]->PID = INVALIDPID; 
+		P[i]->pid = INVALIDPID; 
 		P[i]->QueuePrev = 0; 
 		P[i]->QueueNext = 0; 
 	}	
@@ -91,6 +94,8 @@ OS_Init()
 		Fifos[i]->fid = INVALIDFIFO; 
 	}	
 	
+	Clock = 0;
+
 	DevP = 0;
 	SpoP = 0;
 }
@@ -101,10 +106,7 @@ OS_Start()
 {
 
 	while(1) {
-		/* Check queues and find the next process to run. */ 
-	
-	
-		
+		/* Check queues and find the next process to run. */
 		
 		
 		
@@ -147,8 +149,8 @@ OS_Create(void (*f)(void), int arg, unsigned int level, unsigned int n)
 	/* Find an available process control block */ 
 	for (i = 0; i < MAXPROCESS; i++) { 
 		p = &P[i];
-		if (p->PID == INVALIDPID) {
-			p->PID = i+1; 		
+		if (p->pid == INVALIDPID) {
+			p->pid = i+1; 		
 			break; 
 		}
 	} 
@@ -158,7 +160,7 @@ OS_Create(void (*f)(void), int arg, unsigned int level, unsigned int n)
 	p->Arg        = arg;
 	
 	/* Set the stack pointer to the last address in the workspace. */ 
-	p->SP = (char*)((&StackSpace)+(WORKSPACE*(p->PID))-1); 
+	p->SP = (char*)((&StackSpace)+(WORKSPACE*(p->pid))-1); 
 	/* Set the initial program counter to the address of the function representing the process. */ 
 	p->PC = &f;
 
@@ -167,7 +169,7 @@ OS_Create(void (*f)(void), int arg, unsigned int level, unsigned int n)
 	/* Add Device Processes to the Device Queue */ 
 	else if (p->level == DEVICE)   { DevP = QueueAdd(p, DevP); }
 	
-	return p->PID; 
+	return p->pid; 
 }
  
  
@@ -177,15 +179,20 @@ OS_Create(void (*f)(void), int arg, unsigned int level, unsigned int n)
 */
 void 
 OS_Terminate() {
-	PLast->PID = INVALIDPID;
+	PLast->pid = INVALIDPID;
 
-	if      (PLast->level == SPORATIC) SpoP = QueueRemove(PLast, SpoP); 
-	else if (PLast->level == DEVICE)   DevP = QueueRemove(PLast, DevP); 
+	if      (PLast->level == SPORATIC) { SpoP = QueueRemove(PLast, SpoP); } 
+	else if (PLast->level == DEVICE)   { DevP = QueueRemove(PLast, DevP); }
 	
 	/* Release Semiphores/FIFOS */ 
 	
 	OS_Yield();
 } 
+
+void 
+OS_Yield() {
+	/* Restore control to the kernel */ 
+}
 
 int
 OS_GetParam() {
@@ -197,7 +204,8 @@ Idle () {
 	while (1); 
 }
 
-process *QueueAdd(process *p, process *Queue) {
+process *
+QueueAdd(process *p, process *Queue) {
 	/* The graph has one or more nodes. */ 
 	if (Queue) {
 		/* The graph has more than one existing node. */ 
@@ -220,7 +228,8 @@ process *QueueAdd(process *p, process *Queue) {
 	return Queue; 
 }
 
-process *QueueRemove(process *p, process *Queue) {
+process *
+QueueRemove(process *p, process *Queue) {
 	/* The graph has one or more nodes. */ 
 	if (Queue) { 
 		/* Queue points to the node to be removed. */ 
@@ -242,4 +251,10 @@ process *QueueRemove(process *p, process *Queue) {
 		}
 	}
 	return Queue; 
+}
+
+/* Increments clock. Run by an interrupt every x ms. */ 
+void 
+ClockTick(void) {
+	Clock++; 
 }
