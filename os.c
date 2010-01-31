@@ -198,28 +198,47 @@ Idle () {
 }
 
 process *QueueAdd(process *p, process *Queue) {
+	/* The graph has one or more nodes. */ 
 	if (Queue) {
+		/* The graph has more than one existing node. */ 
 		if (Queue->QueueNext && Queue->QueuePrev) {
 			p->QueuePrev = Queue->QueuePrev; 
 			p->QueueNext = Queue; 
 			Queue->QueuePrev->QueueNext = p; 
 			Queue->QueuePrev = p; 
-		} else {
+		} 
+		/* The graph has exactly one existing node. */ 
+		else {
 			Queue->QueueNext = p 
 			Queue->QueuePrev = p
 		}
-	} else { 
+	} 
+	/* The graph has no existing nodes. */ 
+	else { 
 		Queue = &p; 
 	} 
 	return Queue; 
 }
 
 process *QueueRemove(process *p, process *Queue) {
+	/* The graph has one or more nodes. */ 
 	if (Queue) { 
-		p->QueuePrev->QueueNext = p->QueueNext; 
-		p->QueueNext->QueuePrev = p->QueuePrev; 
-		if (Queue == p) {
-			Queue = p->QueueNext; 
+		/* Queue points to the node to be removed. */ 
+		if (Queue == p) { 
+			/* There is more than one node */ 
+			if (Queue->QueueNext) { Queue = Queue->QueueNext; }
+			/* There is only one node and it is the one to be removed. */ 
+			else                  { return 0; }
+		}
+		/* The graph has only two nodes  */ 
+		if (p->QueuePrev == p->QueueNext) {
+			Queue->QueuePrev = 0; 
+			Queue->QueueNext = 0;
+		}
+		/* The graph has more than two nodes. */ 
+		else {
+			p->QueuePrev->QueueNext = p->QueueNext; 
+			p->QueueNext->QueuePrev = p->QueuePrev; 
 		}
 	}
 	return Queue; 
