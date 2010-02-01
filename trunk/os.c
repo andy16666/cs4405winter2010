@@ -42,17 +42,14 @@ process *PLast; /* Last Process to run */
 
 process PKernel;
 
-/*
-  Periodic Process Queue
-*/ 
 int PPPLen;   /* Maximum of 16 periodic processes allowed to be in queue */
 int PPP[];    /* The queue for periodic scheduling */
 int PPPMax[]; /* Maximum CPU time in msec for each process */
 
 
-process *DevP;   /* Device Process Queue */ 
-
-process *SpoP;   /* Sproatic Process Queue */ 
+process *DevP;    /* Device Process Queue */ 
+process *SpoP;    /* Sproatic Process Queue */
+int      PPPNext; /* Queue index of the next periodic process. */ 
  
 fifo_t Fifos[MAXFIFO]; /* FIFOs */
 
@@ -100,6 +97,7 @@ OS_Init()
 
 	DevP = 0;
 	SpoP = 0;
+	PPPNext = 0; 
 }
  
 /* Actually start the OS */
@@ -108,14 +106,7 @@ OS_Start()
 {
 
 	while(1) {
-		/* Check queues and find the next process to run. */
-		/* Schedule processes:
-				1. Check for devide process ready to run. 
-				OR Check for a PERIODIC process ready to run. 
-				OR Check for a SPORATIC process ready to run. 
-			
-				2. Schedule it. 
-		*/
+		
 
 		
 		/* Transfer control to the scheduled process */ 
@@ -123,6 +114,45 @@ OS_Start()
 	} 
 }
  
+process *
+GetNextProcess() {
+	process *p;  
+	if (DevP) {
+		p = DevP; 
+		do { 
+			if (IsDevPReady(p)) return p; 
+		} while (p = DevP->QueueNext()); 
+	}
+	
+	if (PPPLen && PPP[PPPNext] != IDLE) {
+		if (GetProcessByName(PPP[PPPNext])) {
+			
+		}
+	}
+	
+	if (SpoP) {
+	
+	}
+} 
+
+BOOL
+IsDevPReady(process *p) {
+	if (p->DevNextRunTime <= Clock) { return TRUE; } 
+	else                            { return FALSE; }
+}
+
+process *
+GetPeriodicProcessByName(unsigned int n) {
+	process *p; 
+	for (i = 0; i < MAXPROCESS; i++) {
+		p = &P[i]; 
+		if (p->pid != INVALIDPID) && (p->Level == PERIODIC) && (p->Name == n) {
+			return p; 
+		}		
+	}
+	return 0; 
+}
+
 void
 OS_Abort() {
 	/* Kill those lesser peons and then shoot ourselves in the foot */
