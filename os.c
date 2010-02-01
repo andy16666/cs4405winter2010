@@ -16,14 +16,19 @@
   Process Table 
 */
 typedef struct proc_str {
-	PID pid;  	     /* Process ID. */ 
-	unsigned int Name;   /* Name of process */ 
-	unsigned int Level;  /* Scheduling level/queue */ 
-	int  Arg;            /* Process argument */ 
-	char *SP; 
-	void(*PC)(void);
+	PID pid;  	      /* Process ID. */ 
+	unsigned int Name;    /* Name of process */ 
+	unsigned int Level;   /* Scheduling level/queue */ 
+	int   Arg;            /* Process argument */ 
+	short Stack[WORKSPACE]; 
+	short *SP;            /* Last Stack Pointer */ 
+	short *ISP;           /* Initial Stack Pointer */ 
+	interrupt_vectors IV; /* Interrupt vector for this process. */ 
+	void(*program_location)(void);
+	BOOL running; 
+
 	proc_str* QueuePrev;
-	proc_str* QueueNext;
+	proc_str* QueueNext;	
 } process;
 
 process P[MAXPROCESS];        /* Main process table. */ 
@@ -31,7 +36,7 @@ process P[MAXPROCESS];        /* Main process table. */
 process *PLast; /* Last Process to run */ 
 process *PNext; /* Next Process to run */
 
-process PSupervisor;
+process PKernel;
 
 /*
   Periodic Process Queue
@@ -49,9 +54,7 @@ process *DevP;
   Sproatic Process Queue
 */ 
 process *SpoP;
-
-/* Stack Space */
-char StackSpace[MAXPROCESS*WORKSPACE]; 
+ 
 /* FIFOs */
 fifo_t Fifos[MAXFIFO];
 
@@ -87,7 +90,9 @@ OS_Init()
 	for (i = 0; i < MAXPROCESS; i++) {
 		P[i]->pid = INVALIDPID; 
 		P[i]->QueuePrev = 0; 
-		P[i]->QueueNext = 0; 
+		P[i]->QueueNext = 0;
+		/* Initial stack pointer points at the end of the stack. */ 
+		P[i]->ISP = &(P[i]->StackSpace[WORKSPACE-1]); 
 	}	
 	for (i = 0; i < MAXFIFO; i++) {
 		Fifos[i]->fid = INVALIDFIFO; 
@@ -106,10 +111,6 @@ OS_Start()
 
 	while(1) {
 		/* Check queues and find the next process to run. */
-		
-		
-		
-
 		/* Schedule processes:
 				1. Check for devide process ready to run. 
 				OR Check for a PERIODIC process ready to run. 
@@ -117,6 +118,10 @@ OS_Start()
 			
 				2. Schedule it. 
 		*/
+
+		
+		/* Transfer control to the scheduled process */ 
+		asm (" swi "); 
 	} 
 }
  
@@ -125,18 +130,7 @@ OS_Abort() {
 	/* Kill those lesser peons and then shoot ourselves in the foot */
 }
  
-/*
-* Create a process.
-*
-* Parameters:
-* - f: Pointer to the function to execute.
-* - arg: Initial argument for f, optionally used, retrieved by calling OS_GetParam().
-* - level: The scheduling level for this process.
-* - n: The "name" of this process. For device processes, n represents the 
-*
-* Returns:
-* The PID of the new process.
-*/
+
 PID
 OS_Create(void (*f)(void), int arg, unsigned int level, unsigned int n) {	
 	process *p; 
@@ -155,11 +149,12 @@ OS_Create(void (*f)(void), int arg, unsigned int level, unsigned int n) {
 	p->Name       = n; 
 	p->Level      = level;
 	p->Arg        = arg;
-	
+	p->running    = FALSE; 	
+
 	/* Set the stack pointer to the last address in the workspace. */ 
-	p->SP = (char*)((&StackSpace)+(WORKSPACE*(p->pid))-1); 
+	p->SP = p->ISP; 
 	/* Set the initial program counter to the address of the function representing the process. */ 
-	p->PC = &f;
+	p->program_location = &f;
 
 	/* Add Sporatic Processes to the Sporatic Queue */ 
 	if      (p->level == SPORATIC) { SpoP = QueueAdd(p, SpoP); }
@@ -183,12 +178,15 @@ OS_Terminate() {
 	else if (PLast->level == DEVICE)   { DevP = QueueRemove(PLast, DevP); }
 	
 	/* Release Semiphores/FIFOS */ 
-	OS_Yield();
+	ReturnToKernel(); 
 } 
 
 void 
 OS_Yield() {
+	asm(" swi "); 
 }
+
+
 
 int
 OS_GetParam() {
@@ -255,4 +253,37 @@ ClockTick(void) {
 	OS_DI(); 
 	Clock++; 
 	OS_EI(); 
+}
+
+void 
+ReturnToKernel(void)  {
+	OS_DI(); 
+	/* Store Process Stack Pointer */
+	asm (" sts %0 ": : "r" (&(PLast->SP)):"memory"); 
+	/* Load Kernel Stack Pointer */
+	asm (" lds (%0) ": "=r"(&(PKernel->SP)):"memory"); 
+	/* Load Kernel Interrupt Vector */ 
+
+	/* Return control to the kernel */ 
+	asm (" rti "); 
+}
+
+void 
+SwitchToProcess(void) {
+	/* Store Kernel Stack Pointer */ 
+	asm (" sts " PKernel->SP); 
+	/* Load Process Stack Pointer */ 
+	asm (" lds " PLast->SP); 
+	/* Load Process Interrupt Vector */ 	
+
+	if (PLast->running) {		
+		/* Return control to running process. */ 
+		OS_EI();
+		asm (" rti "); 
+	} else {
+		/* Start process for the first time. */
+		PLast->running = TRUE; 
+		OS_EI();
+		PLast->program_location(); 
+	}
 }
