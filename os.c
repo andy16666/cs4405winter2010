@@ -261,9 +261,9 @@ ReturnToKernel(void)  {
 	/* Load Kernel Interrupt Vector */ 
 	
 	/* Store Process Stack Pointer */
-	asm volatile (" sts %0 " : "=m" (&(PLast->SP)) : : "memory"); 
+	asm volatile (" sts %0 " : "=m" (PLast->SP) : : "memory"); 
 	/* Load Kernel Stack Pointer */
-	asm volatile (" lds %0 " : : "m" (&(PKernel->SP)) : "memory"); 
+	asm volatile (" lds %0 " : : "m" (PKernel->SP) : "memory"); 
 	/* Return control to the kernel */ 
 	asm volatile (" rti "); 
 }
@@ -271,9 +271,9 @@ ReturnToKernel(void)  {
 void 
 SwitchToProcess(void) {
 	/* Store Kernel Stack Pointer */ 
-	asm volatile (" sts %0 " : "=m" (&(PKernel->SP)) : : "memory"); 
+	asm volatile (" sts %0 " : "=m" (PKernel->SP) : : "memory"); 
 	/* Load Process Stack Pointer */ 
-	asm volatile (" lds %0 " : : "m" (&(PLast->SP)) : "memory"); 
+	asm volatile (" lds %0 " : : "m" (PLast->SP) : "memory"); 
 	/* Load Process Interrupt Vector */ 	
 
 
