@@ -257,30 +257,30 @@ ClockTick(void) {
 
 void 
 ReturnToKernel(void)  {
-	OS_DI(); 
-	/* Store Process Stack Pointer */
-	asm (" sts %0 " : "=m" (&(PLast->SP)) : : "memory"); 
-	/* Load Kernel Stack Pointer */
-	asm (" lds %0 " : : "m" (&(PKernel->SP)) : "memory"); 
+	OS_DI(); 	
 	/* Load Kernel Interrupt Vector */ 
-
+	
+	/* Store Process Stack Pointer */
+	asm volatile (" sts %0 " : "=m" (&(PLast->SP)) : : "memory"); 
+	/* Load Kernel Stack Pointer */
+	asm volatile (" lds %0 " : : "m" (&(PKernel->SP)) : "memory"); 
 	/* Return control to the kernel */ 
-	asm (" rti "); 
+	asm volatile (" rti "); 
 }
 
 void 
 SwitchToProcess(void) {
 	/* Store Kernel Stack Pointer */ 
-	asm (" sts " : "=m" (&(PKernel->SP)) : : "memory"); 
+	asm volatile (" sts %0 " : "=m" (&(PKernel->SP)) : : "memory"); 
 	/* Load Process Stack Pointer */ 
-	asm (" lds " : : "m" (&(PLast->SP)) : "memory"); 
+	asm volatile (" lds %0 " : : "m" (&(PLast->SP)) : "memory"); 
 	/* Load Process Interrupt Vector */ 	
 
 
 	if (PLast->running) {		
 		/* Return control to running process. */ 
 		OS_EI();
-		asm (" rti "); 
+		asm volatile (" rti "); 
 	} else {
 		/* Start process for the first time. */
 		PLast->running = TRUE; 
