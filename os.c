@@ -28,13 +28,17 @@ typedef struct proc_str {
 	BOOL running; 
 
 	proc_str* QueuePrev;
-	proc_str* QueueNext;	
+	proc_str* QueueNext;
+
+	/* For a device processes. 
+	   If Clock shows a later time than this, run. */ 
+	unsigned long long DevNextRunTime; 	
 } process;
 
-process P[MAXPROCESS];        /* Main process table. */ 
+process P[MAXPROCESS]; /* Main process table. */ 
 
 process *PLast; /* Last Process to run */ 
-process *PNext; /* Next Process to run */
+/*process *PNext;*/ /* Next Process to run */
 
 process PKernel;
 
@@ -45,18 +49,12 @@ int PPPLen;   /* Maximum of 16 periodic processes allowed to be in queue */
 int PPP[];    /* The queue for periodic scheduling */
 int PPPMax[]; /* Maximum CPU time in msec for each process */
 
-/*
-  Device Process Queue 
-*/ 
-process *DevP; 
 
-/* 
-  Sproatic Process Queue
-*/ 
-process *SpoP;
+process *DevP;   /* Device Process Queue */ 
+
+process *SpoP;   /* Sproatic Process Queue */ 
  
-/* FIFOs */
-fifo_t Fifos[MAXFIFO];
+fifo_t Fifos[MAXFIFO]; /* FIFOs */
 
 /* Gets incremented by an interrupt every x ms. NEVER READ WITH INTERRUPTS ENABLED */ 
 volatile unsigned long long Clock;
@@ -151,7 +149,9 @@ OS_Create(void (*f)(void), int arg, unsigned int level, unsigned int n) {
 	p->Arg        = arg;
 	p->running    = FALSE; 	
 
-	/* Set the stack pointer to the last address in the workspace. */ 
+	p->DevNextRunTime = 0; 
+
+	/* Set the stack pointer to the initial stack pointer. */ 
 	p->SP = p->ISP; 
 	/* Set the initial program counter to the address of the function representing the process. */ 
 	p->program_location = &f;
@@ -263,7 +263,7 @@ ReturnToKernel(void)  {
 	/* Store Process Stack Pointer */
 	asm volatile (" sts %0 " : "=m" (PLast->SP) : : "memory"); 
 	/* Load Kernel Stack Pointer */
-	asm volatile (" lds %0 " : : "m" (PKernel->SP) : "memory"); 
+	asm volatile (" lds %0 " : : "m" (PKernel.SP) : "memory"); 
 	/* Return control to the kernel */ 
 	asm volatile (" rti "); 
 }
@@ -271,7 +271,7 @@ ReturnToKernel(void)  {
 void 
 SwitchToProcess(void) {
 	/* Store Kernel Stack Pointer */ 
-	asm volatile (" sts %0 " : "=m" (PKernel->SP) : : "memory"); 
+	asm volatile (" sts %0 " : "=m" (PKernel.SP) : : "memory"); 
 	/* Load Process Stack Pointer */ 
 	asm volatile (" lds %0 " : : "m" (PLast->SP) : "memory"); 
 	/* Load Process Interrupt Vector */ 	
