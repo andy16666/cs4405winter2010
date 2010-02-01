@@ -259,9 +259,9 @@ void
 ReturnToKernel(void)  {
 	OS_DI(); 
 	/* Store Process Stack Pointer */
-	asm (" sts %0 ": : "r" (&(PLast->SP)):"memory"); 
+	asm (" sts %0 " : "=m" (&(PLast->SP)) : : "memory"); 
 	/* Load Kernel Stack Pointer */
-	asm (" lds (%0) ": "=r"(&(PKernel->SP)):"memory"); 
+	asm (" lds %0 " : : "m" (&(PKernel->SP)) : "memory"); 
 	/* Load Kernel Interrupt Vector */ 
 
 	/* Return control to the kernel */ 
@@ -271,10 +271,11 @@ ReturnToKernel(void)  {
 void 
 SwitchToProcess(void) {
 	/* Store Kernel Stack Pointer */ 
-	asm (" sts " PKernel->SP); 
+	asm (" sts " : "=m" (&(PKernel->SP)) : : "memory"); 
 	/* Load Process Stack Pointer */ 
-	asm (" lds " PLast->SP); 
+	asm (" lds " : : "m" (&(PLast->SP)) : "memory"); 
 	/* Load Process Interrupt Vector */ 	
+
 
 	if (PLast->running) {		
 		/* Return control to running process. */ 
