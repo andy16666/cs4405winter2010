@@ -42,7 +42,7 @@ OS_Write(FIFO f, int val)
 	fifo_t fifo = Fifos[f];
 	
 	/* Cicularly increment the write counter. */
-	fifo.lastWrite = (++(fifo.lastWrite) > FIFOSIZE) ? 0 : fifo.lastWrite;
+	fifo.lastWrite = (++(fifo.lastWrite) >= FIFOSIZE) ? 0 : fifo.lastWrite;
 	fifo.nElems++;
 	
 	fifo.elems[fifo.lastWrite] = val;
@@ -64,7 +64,7 @@ OS_Read(FIFO f, int *val)
 	}
 	
 	/* Circularly increment the read position */
-	fifo.lastRead = (++(fifo.lastRead) > FIFOSIZE) ? 0 : fifo.lastRead;
+	fifo.lastRead = (++(fifo.lastRead) >= FIFOSIZE) ? 0 : fifo.lastRead;
 	*val = fifo.elems[fifo.lastRead];
 	fifo.nElems--;
 	
