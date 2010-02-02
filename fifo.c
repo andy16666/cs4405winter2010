@@ -24,6 +24,9 @@ OS_InitFiFo()
 		{
 			id = i;
 			Fifos[i].id = i;
+			Fifos[i].lastWrite = 0;
+			Fifos[i].lastRead = 0;
+			Fifos[i].nElems = 0;
 			break;
 		}
 	}
@@ -36,7 +39,36 @@ OS_Write(FIFO f, int val)
 {
 	OS_DI();
 	
+	fifo_t fifo = Fifos[f];
 	
+	/* Cicularly increment the write counter. */
+	fifo.lastWrite = (++(fifo.lastWrite) > FIFOSIZE) ? 0 : fifo.lastWrite;
+	fifo.nElems++;
+	
+	fifo.elems[fifo.lastWrite] = val;
 	
 	OS_EI();
 }
+
+BOOL
+OS_Read(FIFO f, int *val)
+{
+	OS_DI();
+	
+	fifo_t fifo = Fifos[f];
+	
+	/* If there is nothing in the FIFO, fail at reading */
+	if(0 == fifo.nElems)
+	{
+		return FALSE;
+	}
+	
+	/* Circularly increment the read position */
+	fifo.lastRead = (++(fifo.lastRead) > FIFOSIZE) ? 0 : fifo.lastRead;
+	*val = fifo.elems[fifo.lastRead];
+	fifo.nElems--;
+	
+	OS_EI();
+	return TRUE;
+}
+
