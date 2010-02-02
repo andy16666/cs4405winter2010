@@ -38,7 +38,6 @@ typedef volatile unsigned long long time_t;
 process P[MAXPROCESS]; /* Main process table. */ 
 
 process *PCurrent; /* Last Process to run */ 
-/*process *PNext;*/ /* Next Process to run */
 
 process PKernel;
 
