@@ -9,7 +9,6 @@
  */
  
 #include "os.h"
-#include "process.h"
 #include "fifo.h"
 
 /* 
@@ -23,15 +22,14 @@ typedef struct proc_str {
 	short Stack[WORKSPACE]; 
 	short *SP;            /* Last Stack Pointer */ 
 	short *ISP;           /* Initial Stack Pointer */ 
-	interrupt_vectors IV; /* Interrupt vector for this process. */ 
-	void(*program_location)(void);
-	BOOL running; 
+	interrupt_vectors_t IV; /* Interrupt vector for this process. */ 
+	void(*program_location)(void); /* Pointer to the process, to start it for the first time. */ 
+	BOOL running;         /* Indicates if the process has been started yet. */ 
 
 	proc_str* QueuePrev;
 	proc_str* QueueNext;
 
-	/* For a device processes. 
-	   If Clock shows a later time than this, run. */ 
+	/* Device processes: run next at this time. */ 
 	time_t DevNextRunTime; 	
 } process;
 
@@ -47,7 +45,6 @@ process PKernel;
 int PPPLen;   /* Maximum of 16 periodic processes allowed to be in queue */
 int PPP[];    /* The queue for periodic scheduling */
 int PPPMax[]; /* Maximum CPU time in msec for each process */
-
 
 process *DevP;         /* Device Process Queue */ 
 process *SpoP;         /* Sproatic Process Queue */
@@ -77,7 +74,10 @@ void
 OS_Init()
 {	int i; 
 
-	PCurrent     = INVALIDPID; 
+	Clock = 0;
+	DevP = 0;
+	SpoP = 0; 
+	PCurrent = 0; 
 	
 	for (i = 0; i < MAXPROCESS; i++) {
 		P[i]->pid = INVALIDPID; 
@@ -90,10 +90,7 @@ OS_Init()
 		Fifos[i]->fid = INVALIDFIFO; 
 	}	
 	
-	Clock = 0;
-
-	DevP = 0;
-	SpoP = 0; 
+	
 }
  
 /* Actually start the OS */
@@ -102,7 +99,7 @@ OS_Start()
 {
 	process *p; 
 	time_t t;         /* Time to interrupt. */ 
-	int ppp_next;      /* Queue index of the next periodic process. */ 
+	int ppp_next;     /* Queue index of the next periodic process. */ 
 
 	ppp_next = 0; 
 
@@ -138,16 +135,20 @@ OS_Start()
 
 			}
 		}
+
+		/* No device processes to run now, to try for a periodic process. */ 
 		if (PPPLen) {
 			/* Determine the time of the next interupt. */ 
 			if (!t || ((Clock+PPPMax[ppp_next]) <  t)) {
 				t = Clock+PPPMax[ppp_next]; 
 			}
+			/* If the process isn't idle, try to look it up. */ 
 			if (PPP[ppp_next] != IDLE) {
 				PCurrent = GetProcessByName(PPP[ppp_next]); 
 			}
 
-			ppp_next = (ppp_next < (PPPLen-1))?(ppp_next+1):(0);
+			/* Increment ppp_next circularly. */
+			ppp_next = (++ppp_next >= PPPLen)?0:ppp_next;
 
 			/* If a periodic process is ready to run, run it. */ 
 			if (PCurrent) {
@@ -155,9 +156,12 @@ OS_Start()
 				asm (" swi ");
 				continue; 
 			}
+
+
 		}
 
 		/* We're here so we must be idle. Schedule a Sporatic Process. */ 
+		/* NOTE: Invalid periodic processes are treated as idle. */ 
 		if (SpoP) {
 			PCurrent = SpoP; 
 			if (t) {
