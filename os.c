@@ -32,12 +32,14 @@ typedef struct proc_str {
 
 	/* For a device processes. 
 	   If Clock shows a later time than this, run. */ 
-	unsigned long long DevNextRunTime; 	
+	time_t DevNextRunTime; 	
 } process;
+
+typedef volatile unsigned long long time_t; 
 
 process P[MAXPROCESS]; /* Main process table. */ 
 
-process *PLast; /* Last Process to run */ 
+process *PCurrent; /* Last Process to run */ 
 /*process *PNext;*/ /* Next Process to run */
 
 process PKernel;
@@ -47,16 +49,12 @@ int PPP[];    /* The queue for periodic scheduling */
 int PPPMax[]; /* Maximum CPU time in msec for each process */
 
 
-process *DevP;    /* Device Process Queue */ 
-process *SpoP;    /* Sproatic Process Queue */
-int      PPPNext; /* Queue index of the next periodic process. */ 
+process *DevP;         /* Device Process Queue */ 
+process *SpoP;         /* Sproatic Process Queue */
  
 fifo_t Fifos[MAXFIFO]; /* FIFOs */
 
-/* Gets incremented by an interrupt every x ms. NEVER READ WITH INTERRUPTS ENABLED */ 
-volatile unsigned long long Clock;
-void ClockTick(void) __attribute__((interrupt)); /* http://www.gnu-m68hc11.org/wiki/index.php/Doc:compiler */ 
-
+time_t Clock;          /* Approximate time since system start in ms. */ 
 
 /* 
   Kernel entry point 
@@ -79,8 +77,7 @@ void
 OS_Init()
 {	int i; 
 
-	PLast     = INVALIDPID; 
-	PNext     = INVALIDPID; 
+	PCurrent     = INVALIDPID; 
 	
 	for (i = 0; i < MAXPROCESS; i++) {
 		P[i]->pid = INVALIDPID; 
@@ -96,44 +93,83 @@ OS_Init()
 	Clock = 0;
 
 	DevP = 0;
-	SpoP = 0;
-	PPPNext = 0; 
+	SpoP = 0; 
 }
  
 /* Actually start the OS */
 void
 OS_Start()
 {
+	process *p; 
+	time_t t;         /* Time to interrupt. */ 
+	int ppp_next;      /* Queue index of the next periodic process. */ 
 
-	while(1) {
-		
+	ppp_next = 0; 
 
-		
-		/* Transfer control to the scheduled process */ 
-		asm (" swi "); 
+	while (1) {
+		PCurrent = 0;
+
+		p = 0; 
+		t = 0;  
+
+		if (DevP) {
+			p = DevP; 
+			do { 
+				if (IsDevPReady(p)) {
+					PCurrent = p; 
+				}
+			} while ((p = DevP->QueueNext()) && (p != DevP)); 
+			
+			/* If a device process is ready, run it. */ 
+			if (PCurrent) {
+				PCurrent->DevNextRunTime += (time_t)(PCurrent->Name); 
+				asm (" swi "); 
+				continue; 
+			}
+			/* Find the time of the next device process, t. */ 
+			else {
+				p = DevP; 
+				t = p->DevNextRunTime; 
+				while ((p = DevP->QueueNext()) && (p != DevP)) { 
+					if (p->DevNextRunTime < t) {
+						t = p->DevNextRunTime; 
+					}
+				} 
+
+			}
+		}
+		if (PPPLen) {
+			/* Determine the time of the next interupt. */ 
+			if (!t || ((Clock+PPPMax[ppp_next]) <  t)) {
+				t = Clock+PPPMax[ppp_next]; 
+			}
+			if (PPP[ppp_next] != IDLE) {
+				PCurrent = GetProcessByName(PPP[ppp_next]); 
+			}
+
+			ppp_next = (ppp_next < (PPPLen-1))?(ppp_next+1):(0);
+
+			/* If a periodic process is ready to run, run it. */ 
+			if (PCurrent) {
+				/* TODO: Set up and OC4 interrupt at time t */ 		
+				asm (" swi ");
+				continue; 
+			}
+		}
+
+		/* We're here so we must be idle. Schedule a Sporatic Process. */ 
+		if (SpoP) {
+			PCurrent = SpoP; 
+			if (t) {
+				/* TODO: Set up an OC4 interrupt at time t */
+			}
+			
+			asm (" swi ");
+			continue; 
+		}
 	} 
 }
  
-process *
-GetNextProcess() {
-	process *p;  
-	if (DevP) {
-		p = DevP; 
-		do { 
-			if (IsDevPReady(p)) return p; 
-		} while (p = DevP->QueueNext()); 
-	}
-	
-	if (PPPLen && PPP[PPPNext] != IDLE) {
-		if (GetProcessByName(PPP[PPPNext])) {
-			
-		}
-	}
-	
-	if (SpoP) {
-	
-	}
-} 
 
 BOOL
 IsDevPReady(process *p) {
@@ -146,7 +182,9 @@ GetPeriodicProcessByName(unsigned int n) {
 	process *p; 
 	for (i = 0; i < MAXPROCESS; i++) {
 		p = &P[i]; 
-		if (p->pid != INVALIDPID) && (p->Level == PERIODIC) && (p->Name == n) {
+		if (p->pid != INVALIDPID) 
+		&& (p->Level == PERIODIC) 
+		&& (p->Name == n) {
 			return p; 
 		}		
 	}
@@ -156,6 +194,7 @@ GetPeriodicProcessByName(unsigned int n) {
 void
 OS_Abort() {
 	/* Kill those lesser peons and then shoot ourselves in the foot */
+	asm(" stop "); 
 }
  
 
@@ -202,17 +241,23 @@ OS_Create(void (*f)(void), int arg, unsigned int level, unsigned int n) {
 void 
 OS_Terminate() {
 	OS_DI(); 
-	PLast->pid = INVALIDPID;
+	PCurrent->pid = INVALIDPID;
 
-	if      (PLast->level == SPORATIC) { SpoP = QueueRemove(PLast, SpoP); } 
-	else if (PLast->level == DEVICE)   { DevP = QueueRemove(PLast, DevP); }
+	if      (PCurrent->level == SPORATIC) { SpoP = QueueRemove(PCurrent, SpoP); } 
+	else if (PCurrent->level == DEVICE)   { DevP = QueueRemove(PCurrent, DevP); }
 	
-	/* Release Semiphores/FIFOS */ 
+	/* TODO: Release Semiphores  */
+ 
 	ReturnToKernel(); 
 } 
 
 void 
 OS_Yield() {
+	if (PCurrent->level == SPORATIC) { 
+		if (SpoP->QueueNext()) {
+			SpoP = SpoP->QueueNext(); 
+		}
+	} 
 	asm(" swi "); 
 }
 
@@ -220,7 +265,7 @@ OS_Yield() {
 
 int
 OS_GetParam() {
-	return PLast->Arg; 
+	return PCurrent->Arg; 
 }
 
 void 
@@ -281,17 +326,17 @@ QueueRemove(process *p, process *Queue) {
 void 
 ClockTick(void) {
 	OS_DI(); 
-	Clock++; 
+	Clock += time_quantum; /* TODO: Calculate time quantum */ 
 	OS_EI(); 
 }
 
 void 
 ReturnToKernel(void)  {
 	OS_DI(); 	
-	/* Load Kernel Interrupt Vector */ 
+	/* TODO: Load Kernel Interrupt Vector */ 
 	
 	/* Store Process Stack Pointer */
-	asm volatile (" sts %0 " : "=m" (PLast->SP) : : "memory"); 
+	asm volatile (" sts %0 " : "=m" (PCurrent->SP) : : "memory"); 
 	/* Load Kernel Stack Pointer */
 	asm volatile (" lds %0 " : : "m" (PKernel.SP) : "memory"); 
 	/* Return control to the kernel */ 
@@ -303,18 +348,17 @@ SwitchToProcess(void) {
 	/* Store Kernel Stack Pointer */ 
 	asm volatile (" sts %0 " : "=m" (PKernel.SP) : : "memory"); 
 	/* Load Process Stack Pointer */ 
-	asm volatile (" lds %0 " : : "m" (PLast->SP) : "memory"); 
-	/* Load Process Interrupt Vector */ 	
+	asm volatile (" lds %0 " : : "m" (PCurrent->SP) : "memory"); 
+	/* TODO: Load Process Interrupt Vector */ 	
 
-
-	if (PLast->running) {		
+	if (PCurrent->running) {		
 		/* Return control to running process. */ 
 		OS_EI();
 		asm volatile (" rti "); 
 	} else {
 		/* Start process for the first time. */
-		PLast->running = TRUE; 
+		PCurrent->running = TRUE; 
 		OS_EI();
-		PLast->program_location(); 
+		PCurrent->program_location(); 
 	}
 }
