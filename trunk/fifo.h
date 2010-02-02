@@ -19,8 +19,8 @@ typedef struct fifo
 	FIFO fid;			/* The ID of the FIFO. */
 	int elems[FIFOSIZE];
 	int nElems;			/* Number of elements currently used in this FIFO */
-	int* lastRead;
-	int* lastWrite;
+	int lastRead;		/* The index of the last element read */
+	int lastWrite;		/* The index of the last element written */
 } fifo_t;
 
 #endif /* __FIFO_H__ */
