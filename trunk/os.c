@@ -11,43 +11,50 @@
 #include "os.h"
 #include "fifo.h"
 
+typedef volatile unsigned long long time_t; 
 /* 
   Process Table 
 */
 typedef struct proc_str {
-	PID pid;  	      /* Process ID. */ 
-	unsigned int Name;    /* Name of process */ 
-	unsigned int Level;   /* Scheduling level/queue */ 
-	int   Arg;            /* Process argument */ 
+	PID pid;  	                   /* Process ID. */ 
+	unsigned int Name;             /* Name of process */ 
+	unsigned int Level;            /* Scheduling level/queue */ 
+	int   Arg;                     /* Process argument */ 
 	short Stack[WORKSPACE]; 
-	short *SP;            /* Last Stack Pointer */ 
-	short *ISP;           /* Initial Stack Pointer */ 
-	interrupt_vectors_t IV; /* Interrupt vector for this process. */ 
+	short *SP;                     /* Last Stack Pointer */ 
+	const short *ISP;              /* Initial Stack Pointer */ 
+	interrupt_vectors_t IV;        /* Interrupt vector for this process. */ 
 	void(*program_location)(void); /* Pointer to the process, to start it for the first time. */ 
-	BOOL running;         /* Indicates if the process has been started yet. */ 
+	BOOL running;                  /* Indicates if the process has been started yet. */ 
 
-	proc_str* QueuePrev;
-	proc_str* QueueNext;
+	proc_str* QueuePrev;           /* Pointer to the previous process of the same type, for SPORATIC and DEVICES. */ 
+	proc_str* QueueNext;           /* Pointer to the next process of the same type. */ 
 
 	/* Device processes: run next at this time. */ 
 	time_t DevNextRunTime; 	
 } process;
 
-typedef volatile unsigned long long time_t; 
+typedef struct kern_str {
+	short *SP;                     /* Last Stack Pointer */ 
+	interrupt_vectors_t IV;        /* Interrupt vector for the kernel. */ 
+} kernel; 
+
+
+
+process IdleProcess; 
 
 process P[MAXPROCESS]; /* Main process table. */ 
 
-process *PCurrent; /* Last Process to run */ 
-
-process PKernel;
-
-int PPPLen;   /* Maximum of 16 periodic processes allowed to be in queue */
-int PPP[];    /* The queue for periodic scheduling */
-int PPPMax[]; /* Maximum CPU time in msec for each process */
-
+process *PCurrent;     /* Last Process to run */ 
 process *DevP;         /* Device Process Queue */ 
 process *SpoP;         /* Sproatic Process Queue */
- 
+
+kernel PKernel;
+
+int PPPLen;            /* Maximum of 16 periodic processes allowed to be in queue */
+int PPP[];             /* The queue for periodic scheduling */
+int PPPMax[];          /* Maximum CPU time in msec for each process */
+
 fifo_t Fifos[MAXFIFO]; /* FIFOs */
 
 time_t Clock;          /* Approximate time since system start in ms. */ 
@@ -78,18 +85,31 @@ OS_Init()
 	SpoP = 0; 
 	PCurrent = 0; 
 	
+	/* TODO: Set up kernel process. */ 
+	/* TODO: Set Kernel Interrupt Vector: PKernel.IV = */
+	
+	/* Initialize processes */ 
 	for (i = 0; i < MAXPROCESS; i++) {
 		P[i]->pid = INVALIDPID; 
 		P[i]->QueuePrev = 0; 
 		P[i]->QueueNext = 0;
 		/* Initial stack pointer points at the end of the stack. */ 
-		P[i]->ISP = &(P[i]->StackSpace[WORKSPACE-1]); 
+		P[i]->ISP = &(P[i]->Stack[WORKSPACE-1]); 
+		/* TODO: Set IdleProcess.IV  =  */ 
 	}	
+	/* Initialize fifos. */ 
 	for (i = 0; i < MAXFIFO; i++) {
 		Fifos[i]->fid = INVALIDFIFO; 
 	}	
 	
-	
+	/* Set up the idle process. */ 
+	IdleProcess.pid  = INVALIDPID; 
+	IdleProcess.Name = IDLE; 
+	IdleProcess.ISP  = &(IdleProcess.Stack[WORKSPACE-1]);
+	IdleProcess.SP   = IdleProcess.ISP; 
+	/* TODO: Set IdleProcess.IV  =  */ 
+	IdleProcess.program_location = &Idle; 
+	IdleProcess.running = FALSE; 
 }
  
 /* Actually start the OS */
@@ -102,14 +122,15 @@ OS_Start()
 
 	ppp_next = 0; 
 
+	/* Scheduler */ 
 	while (1) {
 		PCurrent = 0;
-
 		p = 0; 
 		t = 0;  
 
 		if (DevP) {
 			p = DevP; 
+			/* Search for a Device process ready to run. */ 
 			do { 
 				if (IsDevPReady(p)) {
 					PCurrent = p; 
@@ -119,7 +140,8 @@ OS_Start()
 			/* If a device process is ready, run it. */ 
 			if (PCurrent) {
 				PCurrent->DevNextRunTime += (time_t)(PCurrent->Name); 
-				asm (" swi "); 
+				/* Store Kernel Stack pointer and do a Context Switch*/ 
+				ContextSwitch(PKernel.SP); 
 				continue; 
 			}
 			/* Find the time of the next device process, t. */ 
@@ -131,7 +153,6 @@ OS_Start()
 						t = p->DevNextRunTime; 
 					}
 				} 
-
 			}
 		}
 
@@ -151,12 +172,10 @@ OS_Start()
 
 			/* If a periodic process is ready to run, run it. */ 
 			if (PCurrent) {
-				/* TODO: Set up and OC4 interrupt at time t */ 		
-				asm (" swi ");
+				/* TODO: Set up and OC4 interrupt at time t */
+				ContextSwitch(PKernel.SP); 
 				continue; 
 			}
-
-
 		}
 
 		/* We're here so we must be idle. Schedule a Sporatic Process. */ 
@@ -165,15 +184,29 @@ OS_Start()
 			PCurrent = SpoP; 
 			if (t) {
 				/* TODO: Set up an OC4 interrupt at time t */
-			}
-			
-			asm (" swi ");
+			}	
+			ContextSwitch(PKernel.SP); 
+			continue; 
+		}
+		
+		/* We're here so we must be idle and there must be no sporatic processes to run. */ 
+		if (t) {
+			/* TODO: Set up an OC4 interrupt at time t */
+			PCurrent = &IdleProcess;
+			ContextSwitch(PKernel.SP); 			
 			continue; 
 		}
 	} 
 }
  
 
+void inline ContextSwitch(short *SP) {
+	/* Store the stack pointer in the given location. */ 
+	asm volatile (" sts %0 " : "=m" (SP) : : "memory"); 
+	/* Interrupt to a new context. */ 
+	asm volatile (" swi "); 
+}
+ 
 BOOL
 IsDevPReady(process *p) {
 	if (p->DevNextRunTime <= Clock) { return TRUE; } 
@@ -236,8 +269,6 @@ OS_Create(void (*f)(void), int arg, unsigned int level, unsigned int n) {
 	return p->pid; 
 }
  
- 
-
 /*
 * End a process.
 */
@@ -246,11 +277,12 @@ OS_Terminate() {
 	OS_DI(); 
 	PCurrent->pid = INVALIDPID;
 
+	/* Remove the process from the SPORATIC queue */
 	if      (PCurrent->level == SPORATIC) { SpoP = QueueRemove(PCurrent, SpoP); } 
+	/* Remove the process from the DEVICE queue */
 	else if (PCurrent->level == DEVICE)   { DevP = QueueRemove(PCurrent, DevP); }
 	
 	/* TODO: Release Semiphores  */
- 
 	ReturnToKernel(); 
 } 
 
@@ -261,7 +293,7 @@ OS_Yield() {
 			SpoP = SpoP->QueueNext(); 
 		}
 	} 
-	asm(" swi "); 
+	ContextSwitch(PCurrent->SP); 
 }
 
 
@@ -269,11 +301,6 @@ OS_Yield() {
 int
 OS_GetParam() {
 	return PCurrent->Arg; 
-}
-
-void 
-Idle () {
-	while (1); 
 }
 
 process *
@@ -338,8 +365,6 @@ ReturnToKernel(void)  {
 	OS_DI(); 	
 	/* TODO: Load Kernel Interrupt Vector */ 
 	
-	/* Store Process Stack Pointer */
-	asm volatile (" sts %0 " : "=m" (PCurrent->SP) : : "memory"); 
 	/* Load Kernel Stack Pointer */
 	asm volatile (" lds %0 " : : "m" (PKernel.SP) : "memory"); 
 	/* Return control to the kernel */ 
@@ -348,20 +373,34 @@ ReturnToKernel(void)  {
 
 void 
 SwitchToProcess(void) {
-	/* Store Kernel Stack Pointer */ 
-	asm volatile (" sts %0 " : "=m" (PKernel.SP) : : "memory"); 
-	/* Load Process Stack Pointer */ 
-	asm volatile (" lds %0 " : : "m" (PCurrent->SP) : "memory"); 
 	/* TODO: Load Process Interrupt Vector */ 	
-
+	
 	if (PCurrent->running) {		
+		/* Load Process Stack Pointer */ 
+		asm volatile (" lds %0 " : : "m" (PCurrent->SP) : "memory"); 
 		/* Return control to running process. */ 
 		OS_EI();
 		asm volatile (" rti "); 
 	} else {
 		/* Start process for the first time. */
 		PCurrent->running = TRUE; 
+		/* Load Process Stack Pointer */ 
+		asm volatile (" lds %0 " : : "m" (PCurrent->SP) : "memory"); 
 		OS_EI();
-		PCurrent->program_location(); 
+		PCurrent->program_location();
+		OS_DI();
+		/* When the process ends run terminate to clean it up. */ 
+		OS_Terminate(); 
 	}
 }
+
+void 
+UnhandledInterrupt(void) {
+	/* Do Nothing. */
+}
+
+void 
+Idle (void) {
+	while (1); 
+}
+
