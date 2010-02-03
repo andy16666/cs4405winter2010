@@ -43,7 +43,14 @@ OS_Write(FIFO f, int val)
 	
 	/* Cicularly increment the write counter. */
 	fifo.lastWrite = (++(fifo.lastWrite) >= FIFOSIZE) ? 0 : fifo.lastWrite;
-	fifo.nElems++;
+	if(FIFOSIZE >= fifo.nElems)
+	{
+		fifo.lastRead = (++(fifo.lastRead) >= FIFOSIZE) ? 0 : fifo.lastRead;
+	}
+	else
+	{
+		fifo.nElems++;
+	}
 	
 	fifo.elems[fifo.lastWrite] = val;
 	
@@ -65,7 +72,7 @@ OS_Read(FIFO f, int *val)
 	
 	/* Circularly increment the read position */
 	fifo.lastRead = (++(fifo.lastRead) >= FIFOSIZE) ? 0 : fifo.lastRead;
-	*val = fifo.elems[fifo.lastRead];
+	val = &(fifo.elems[fifo.lastRead]);
 	fifo.nElems--;
 	
 	OS_EI();
