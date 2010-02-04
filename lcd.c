@@ -11,7 +11,7 @@
 #define RESETV	(*(interrupt_t *)(0xBFC0 + 0x3E))
 
 
-void sys_send_command_lcd(unsigned short operation, unsigned short operand) {
+void sys_send_command_lcd(unsigned static short operation, unsigned static short operand) {
 	asm volatile(
 		"ldx	#4096        \n"  /* $1000 = Port-base.  */ 
 		"bclr	0,X	#16  \n"
