@@ -10,36 +10,89 @@
  
 #include "os.h"
 #include "fifo.h"
+#include "interrupts.h"
+#include "ports.h"
 
 typedef volatile unsigned long long time_t; 
 /* 
   Process Table 
 */
-typedef struct proc_str {
+typedef struct proc_struct {
 	PID pid;  	                   /* Process ID. */ 
 	unsigned int Name;             /* Name of process */ 
 	unsigned int Level;            /* Scheduling level/queue */ 
 	int   Arg;                     /* Process argument */ 
 	short Stack[WORKSPACE]; 
 	short *SP;                     /* Last Stack Pointer */ 
-	const short *ISP;              /* Initial Stack Pointer */ 
-	interrupt_vectors_t IV;        /* Interrupt vector for this process. */ 
+	short *ISP;              /* Initial Stack Pointer */ 
+	interrupt_t  SwiHandler;       /* Interrupt vector for this process. */ 
+	interrupt_t  OC4Handler;                                             
 	void(*program_location)(void); /* Pointer to the process, to start it for the first time. */ 
 	BOOL running;                  /* Indicates if the process has been started yet. */ 
 
-	proc_str* QueuePrev;           /* Pointer to the previous process of the same type, for SPORATIC and DEVICES. */ 
-	proc_str* QueueNext;           /* Pointer to the next process of the same type. */ 
-
-	/* Device processes: run next at this time. */ 
-	time_t DevNextRunTime; 	
+	struct proc_struct* QueuePrev;     /* Pointer to the previous process of the same type, for SPORATIC and DEVICES. */ 
+	struct proc_struct* QueueNext;     /* Pointer to the next process of the same type. */ 
+	
+	time_t DevNextRunTime; 	       /* Device processes: run next at this time. */ 
 } process;
 
-typedef struct kern_str {
+typedef struct kernel_struct {
 	short *SP;                     /* Last Stack Pointer */ 
-	interrupt_vectors_t IV;        /* Interrupt vector for the kernel. */ 
+	interrupt_t SwiHandler;        /* Interrupt vector for the kernel. */ 
 } kernel; 
 
+/* Interrupt Service Handlers */ 
+void Idle (void); 
+void ClockTick(void); 
+void UnhandledInterrupt(void); 
+void SwitchToProcess(void); 
+void ReturnToKernel(void); 
 
+/* Process management helpers. */ 
+void ContextSwitch(short *SP); 
+BOOL IsDevPReady(process *p); 
+process *GetPeriodicProcessByName(unsigned int n); 
+process *QueueAdd(process *p, process *Queue);
+process *QueueRemove(process *p, process *Queue);  
+
+
+extern volatile unsigned short __attribute__((section("ports"))) Ports[];
+
+/* The interrupt vector. */ 
+volatile struct interrupt_vectors __attribute__((section("vectors"))) IV = {
+   unused0:                UnhandledInterrupt,
+   unused1:                UnhandledInterrupt,
+   unused2:                UnhandledInterrupt,
+   unused3:                UnhandledInterrupt,
+   unused4:                UnhandledInterrupt,
+   unused5:                UnhandledInterrupt,
+   unused6:                UnhandledInterrupt,
+   unused7:                UnhandledInterrupt,
+   unused8:                UnhandledInterrupt,
+   unused9:                UnhandledInterrupt, 
+   unused10:               UnhandledInterrupt, /* unused interrupt handlers */
+   sci_handler:            UnhandledInterrupt, /* sci - unused */
+   spi_handler:            UnhandledInterrupt, /* spi - unused */
+   acc_overflow_handler:   UnhandledInterrupt, /* acc overflow - right shaft encoder - calib */
+   acc_input_handler:      UnhandledInterrupt, /* acc input - right shaft encoder - turning */
+   timer_overflow_handler: UnhandledInterrupt, /* timer overflow handler */
+   output5_handler:        UnhandledInterrupt, /* out compare 5 - sound */
+   output4_handler:        UnhandledInterrupt, /* out compare 4 - unused */
+   output3_handler:        UnhandledInterrupt, /* out compare 3 - unused */
+   output2_handler:        UnhandledInterrupt, /* out compare 2 - unused */
+   output1_handler:        UnhandledInterrupt, /* out compare 1 - unused */
+   capture3_handler:       UnhandledInterrupt, /* in capt 3 -left shaft encoder -calib & turning*/
+   capture2_handler:       UnhandledInterrupt, /* in capt 2 - unused */
+   capture1_handler:       UnhandledInterrupt, /* in capt 1 - unused */
+   irq_handler:            UnhandledInterrupt, /* IRQ - unused */
+   xirq_handler:           UnhandledInterrupt, /* XIRQ - unused */
+   swi_handler:            UnhandledInterrupt, /* swi - unused */
+   illegal_handler:        UnhandledInterrupt, /* illegal -unused */
+   cop_fail_handler:       UnhandledInterrupt, /* unused */
+   cop_clock_handler:      UnhandledInterrupt, /* unused */
+   rtii_handler:           ReturnToKernel, /* rti - task switching / timer */
+   reset_handler:          UnhandledInterrupt /* reset vector - go to premain */
+};
 
 process IdleProcess; 
 
@@ -49,36 +102,39 @@ process *PCurrent;     /* Last Process to run */
 process *DevP;         /* Device Process Queue */ 
 process *SpoP;         /* Sproatic Process Queue */
 
-kernel PKernel;
+int PPPLen;
+int PPP[MAXPROCESS]; 
+int PPPMax[MAXPROCESS];
 
-int PPPLen;            /* Maximum of 16 periodic processes allowed to be in queue */
-int PPP[];             /* The queue for periodic scheduling */
-int PPPMax[];          /* Maximum CPU time in msec for each process */
+kernel PKernel;
 
 fifo_t Fifos[MAXFIFO]; /* FIFOs */
 
 time_t Clock;          /* Approximate time since system start in ms. */ 
+time_t TimeQuantum; 
 
 /* 
   Kernel entry point 
 */
-void
-main(int argc, char** argv)
-{	OS_Init();
-	
-	PPPLen = 1; 
-	PPP    = {IDLE}; 
-	PPPMax = {10  }; 
+int main() {	
+	/* Set Prescale Rate */	
+
+	OS_Init();
+
+	int PPPLen   = 2;
+	int PPP[]    = {-1,-1}; 
+	int PPPMax[] = {10,3}; 
 
 	/* Create processes here */
 	
 	OS_Start(); 
+
+	return 0;
 }
  
 /* Initialize the OS */
-void
-OS_Init()
-{	int i; 
+void OS_Init(void) {	
+	int i; 
 
 	Clock = 0;
 	DevP = 0;
@@ -90,16 +146,16 @@ OS_Init()
 	
 	/* Initialize processes */ 
 	for (i = 0; i < MAXPROCESS; i++) {
-		P[i]->pid = INVALIDPID; 
-		P[i]->QueuePrev = 0; 
-		P[i]->QueueNext = 0;
+		P[i].pid = INVALIDPID; 
+		P[i].QueuePrev = 0; 
+		P[i].QueueNext = 0;
 		/* Initial stack pointer points at the end of the stack. */ 
-		P[i]->ISP = &(P[i]->Stack[WORKSPACE-1]); 
+		P[i].ISP = &(P[i].Stack[WORKSPACE-1]); 
 		/* TODO: Set IdleProcess.IV  =  */ 
 	}	
 	/* Initialize fifos. */ 
 	for (i = 0; i < MAXFIFO; i++) {
-		Fifos[i]->fid = INVALIDFIFO; 
+		Fifos[i].fid = INVALIDFIFO; 
 	}	
 	
 	/* Set up the idle process. */ 
@@ -113,8 +169,7 @@ OS_Init()
 }
  
 /* Actually start the OS */
-void
-OS_Start()
+void OS_Start(void)
 {
 	process *p; 
 	time_t t;         /* Time to interrupt. */ 
@@ -135,7 +190,7 @@ OS_Start()
 				if (IsDevPReady(p)) {
 					PCurrent = p; 
 				}
-			} while ((p = DevP->QueueNext()) && (p != DevP)); 
+			} while ((p = DevP->QueueNext) && (p != DevP)); 
 			
 			/* If a device process is ready, run it. */ 
 			if (PCurrent) {
@@ -148,7 +203,7 @@ OS_Start()
 			else {
 				p = DevP; 
 				t = p->DevNextRunTime; 
-				while ((p = DevP->QueueNext()) && (p != DevP)) { 
+				while ((p = DevP->QueueNext) && (p != DevP)) { 
 					if (p->DevNextRunTime < t) {
 						t = p->DevNextRunTime; 
 					}
@@ -164,7 +219,7 @@ OS_Start()
 			}
 			/* If the process isn't idle, try to look it up. */ 
 			if (PPP[ppp_next] != IDLE) {
-				PCurrent = GetProcessByName(PPP[ppp_next]); 
+				PCurrent = GetPeriodicProcessByName(PPP[ppp_next]); 
 			}
 
 			/* Increment ppp_next circularly. */
@@ -199,43 +254,12 @@ OS_Start()
 	} 
 }
  
-
-void inline ContextSwitch(short *SP) {
-	/* Store the stack pointer in the given location. */ 
-	asm volatile (" sts %0 " : "=m" (SP) : : "memory"); 
-	/* Interrupt to a new context. */ 
-	asm volatile (" swi "); 
-}
- 
-BOOL
-IsDevPReady(process *p) {
-	if (p->DevNextRunTime <= Clock) { return TRUE; } 
-	else                            { return FALSE; }
-}
-
-process *
-GetPeriodicProcessByName(unsigned int n) {
-	process *p; 
-	for (i = 0; i < MAXPROCESS; i++) {
-		p = &P[i]; 
-		if (p->pid != INVALIDPID) 
-		&& (p->Level == PERIODIC) 
-		&& (p->Name == n) {
-			return p; 
-		}		
-	}
-	return 0; 
-}
-
-void
-OS_Abort() {
-	/* Kill those lesser peons and then shoot ourselves in the foot */
+void OS_Abort() {
 	asm(" stop "); 
 }
  
 
-PID
-OS_Create(void (*f)(void), int arg, unsigned int level, unsigned int n) {	
+PID OS_Create(void (*f)(void), int arg, unsigned int level, unsigned int n) {	
 	process *p; 
 	int i; 
 	
@@ -259,38 +283,33 @@ OS_Create(void (*f)(void), int arg, unsigned int level, unsigned int n) {
 	/* Set the stack pointer to the initial stack pointer. */ 
 	p->SP = p->ISP; 
 	/* Set the initial program counter to the address of the function representing the process. */ 
-	p->program_location = &f;
+	p->program_location = f;
 
 	/* Add Sporatic Processes to the Sporatic Queue */ 
-	if      (p->level == SPORATIC) { SpoP = QueueAdd(p, SpoP); }
+	if      (p->Level == SPORADIC) { SpoP = QueueAdd(p, SpoP); }
 	/* Add Device Processes to the Device Queue */ 
-	else if (p->level == DEVICE)   { DevP = QueueAdd(p, DevP); }
+	else if (p->Level == DEVICE)   { DevP = QueueAdd(p, DevP); }
 	
 	return p->pid; 
 }
  
-/*
-* End a process.
-*/
-void 
-OS_Terminate() {
+void OS_Terminate() {
 	OS_DI(); 
 	PCurrent->pid = INVALIDPID;
 
 	/* Remove the process from the SPORATIC queue */
-	if      (PCurrent->level == SPORATIC) { SpoP = QueueRemove(PCurrent, SpoP); } 
+	if      (PCurrent->Level == SPORADIC) { SpoP = QueueRemove(PCurrent, SpoP); } 
 	/* Remove the process from the DEVICE queue */
-	else if (PCurrent->level == DEVICE)   { DevP = QueueRemove(PCurrent, DevP); }
+	else if (PCurrent->Level == DEVICE)   { DevP = QueueRemove(PCurrent, DevP); }
 	
 	/* TODO: Release Semiphores  */
 	ReturnToKernel(); 
 } 
 
-void 
-OS_Yield() {
-	if (PCurrent->level == SPORATIC) { 
-		if (SpoP->QueueNext()) {
-			SpoP = SpoP->QueueNext(); 
+void OS_Yield() {
+	if (PCurrent->Level == SPORADIC) { 
+		if (SpoP->QueueNext) {
+			SpoP = SpoP->QueueNext; 
 		}
 	} 
 	ContextSwitch(PCurrent->SP); 
@@ -298,13 +317,38 @@ OS_Yield() {
 
 
 
-int
-OS_GetParam() {
+int OS_GetParam() {
 	return PCurrent->Arg; 
 }
 
-process *
-QueueAdd(process *p, process *Queue) {
+void ContextSwitch(short *SP) {
+	/* Store the stack pointer in the given location. */ 
+	asm volatile (" sts %0 " : "=m" (SP) : : "memory"); 
+	/* Interrupt to a new context. */ 
+	asm volatile (" swi "); 
+}
+ 
+BOOL IsDevPReady(process *p) {
+	if (p->DevNextRunTime <= Clock) { return TRUE; } 
+	else                            { return FALSE; }
+}
+
+process *GetPeriodicProcessByName(unsigned int n) {
+	int i; 
+	process *p; 
+	for (i = 0; i < MAXPROCESS; i++) {
+		p = &P[i]; 
+		if ((p->pid != INVALIDPID) 
+		&& (p->Level == PERIODIC) 
+		&& (p->Name == n)
+		) {
+			return p; 
+		}		
+	}
+	return 0; 
+}
+
+process *QueueAdd(process *p, process *Queue) {
 	/* The graph has one or more nodes. */ 
 	if (Queue) {
 		/* The graph has more than one existing node. */ 
@@ -316,19 +360,18 @@ QueueAdd(process *p, process *Queue) {
 		} 
 		/* The graph has exactly one existing node. */ 
 		else {
-			Queue->QueueNext = p 
-			Queue->QueuePrev = p
+			Queue->QueueNext = p; 
+			Queue->QueuePrev = p;
 		}
 	} 
 	/* The graph has no existing nodes. */ 
 	else { 
-		Queue = &p; 
+		Queue = p; 
 	} 
 	return Queue; 
 }
 
-process *
-QueueRemove(process *p, process *Queue) {
+process *QueueRemove(process *p, process *Queue) {
 	/* The graph has one or more nodes. */ 
 	if (Queue) { 
 		/* Queue points to the node to be removed. */ 
@@ -353,15 +396,13 @@ QueueRemove(process *p, process *Queue) {
 }
 
 /* Increments clock. Run by an interrupt every x ms. */ 
-void 
-ClockTick(void) {
+void ClockTick(void) {
 	OS_DI(); 
-	Clock += time_quantum; /* TODO: Calculate time quantum */ 
+	Clock += TimeQuantum; /* TODO: Calculate time quantum */ 
 	OS_EI(); 
 }
 
-void 
-ReturnToKernel(void)  {
+void ReturnToKernel(void)  {
 	OS_DI(); 	
 	/* TODO: Load Kernel Interrupt Vector */ 
 	
@@ -371,8 +412,7 @@ ReturnToKernel(void)  {
 	asm volatile (" rti "); 
 }
 
-void 
-SwitchToProcess(void) {
+void SwitchToProcess(void) {
 	/* TODO: Load Process Interrupt Vector */ 	
 	
 	if (PCurrent->running) {		
@@ -394,13 +434,11 @@ SwitchToProcess(void) {
 	}
 }
 
-void 
-UnhandledInterrupt(void) {
+void UnhandledInterrupt(void) {
 	/* Do Nothing. */
 }
 
-void 
-Idle (void) {
+void Idle (void) {
 	while (1); 
 }
 
