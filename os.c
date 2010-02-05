@@ -339,16 +339,12 @@ int OS_GetParam() {
 /* Called directly to transfer control to the kernel, saving current context. */ 
 void ContextSwitchToKernel(void)  { 
 	OS_DI(); 
-	/* Store the stack pointer in the given location. */ 
-	asm volatile (" sts %0 " : "=m" (PCurrent->SP) : : "memory"); 
 	/* Interrupt to a SwitchToProcess() or ReturnToKernel() ISRs. */ 
 	asm volatile (" swi "); 
 	/* This function returns when rti is called. */
 }
 /* Called directly to transfer control to PCurrent, saving current context. */ 
 void ContextSwitchToProcess(void) { 
-    /* Store the stack pointer in the given location. */ 
-	asm volatile (" sts %0 " : "=m" (PKernel.SP) : : "memory"); 
 	/* Interrupt to a SwitchToProcess() or ReturnToKernel() ISRs. */ 
 	asm volatile (" swi "); 
 	/* This function returns when rti is called. */
@@ -481,8 +477,11 @@ process *QueueRemove(process *p, process *Queue) {
     - OS_Terminate(). 
 */ 
 void ReturnToKernel(void)  {
-	ClockUpdate(); 
 	OS_DI(); 	
+	/* Store the stack pointer in the given location. */ 
+	asm volatile (" sts %0 " : "=m" (PCurrent->SP) : : "memory"); 
+	/* Correct for function call. */
+	PCurrent->SP++; 
 	/* Reset interrupt handlers. */ 
 	IV.OC4 = 0; /* The kernel cannot be preempted. */ 
 	IV.SWI = SwitchToProcess; 
@@ -495,6 +494,10 @@ void ReturnToKernel(void)  {
 
 /* Transfer control PCurrent. ONLY called by SWI from ContextSwitch() in kernel mode. */ 
 void SwitchToProcess(void) {
+	 /* Store the stack pointer in the given location. */ 
+	asm volatile (" sts %0 " : "=m" (PKernel.SP) : : "memory"); 
+	/* Correct for function call. */
+	PKernel.SP++; 
 	/* Set interrupt handlers. */ 
 	IV.OC4 = ContextSwitchToKernel; /* If OC4 is triggered, save state and SWI */ 
 	IV.SWI = ReturnToKernel;
