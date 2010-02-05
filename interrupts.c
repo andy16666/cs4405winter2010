@@ -33,7 +33,7 @@ volatile struct interrupt_vectors __attribute__((section("vectors"))) IV = {
    cop_fail_handler:       UnhandledInterrupt, /* unused */
    cop_clock_handler:      UnhandledInterrupt, /* unused */
    rtii_handler:           UnhandledInterrupt, /*  */
-   reset_handler:          UnhandledInterrupt  /* reset vector - go to premain */
+   Reset:                  UnhandledInterrupt  /* reset vector - go to premain */
 };
 
 void UnhandledInterrupt(void) {	

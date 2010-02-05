@@ -60,7 +60,7 @@ struct interrupt_vectors
    interrupt_t cop_fail_handler; /* COP vectors */
    interrupt_t cop_clock_handler; 
  
-   interrupt_t reset_handler; /* Reset Vector */
+   interrupt_t Reset; /* Reset Vector */
 };
 
 typedef struct interrupt_vectors interrupt_vectors_t;
