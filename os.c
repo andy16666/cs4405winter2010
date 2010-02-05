@@ -255,7 +255,14 @@ void SetPreemptionTime(time_t time) {
 
 /* Set OC4 to interrupt in a number of miliseconds. */ 
 void SetPreemptionTimerInterval(unsigned int miliseconds) {
-	Ports[M6811_TOC4_HIGH] = (Ports[M6811_TCNT_HIGH] + (unsigned int)(miliseconds * TimeQuantum)) % 0xFFFF; 
+	unsigned int *TOC4_address; 
+	unsigned int *timer_address; 
+	
+	/* Make sure these are read as 16 bit numbers. */ 
+	TOC4_address  = (unsigned int *)&Ports[M6811_TCNT_HIGH];
+	timer_address = (unsigned int *)&Ports[M6811_TOC4_HIGH];
+	
+	*TOC4_address = (*timer_address + (unsigned int)(miliseconds * TimeQuantum)) % 0xFFFF; 
 }
 
 PID OS_Create(void (*f)(void), int arg, unsigned int level, unsigned int n) {	
@@ -342,11 +349,13 @@ void ClockUpdateHandler (void) {
 void ClockUpdate(void) {
 	unsigned int elapsed_time; 
 	unsigned int timer_value; 
+	unsigned int *timer_address; 
 	static unsigned int residual = 0; 
 	static unsigned int last_timer_value = 0;
 	
-	/* Read the timer from the tick register. */ 
-	timer_value = (unsigned int)Ports[M6811_TCNT_HIGH];
+	/* Read the timer from the tick register as a single 16 bit number. */ 
+	timer_address = (unsigned int *)&Ports[M6811_TCNT_HIGH];
+	timer_value = *timer_address; 
 
 	/* Check for TOF flag indicating an overflow condition. */ 
 	if (Ports[M6811_TFLG2] & M6811_BIT7) {
