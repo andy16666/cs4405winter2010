@@ -1,17 +1,27 @@
 /* Part 1:  68HC11 Definitions. */
 
 
-
-
 /* Timing */ 
 #define M6811_TCNT_HIGH	0x0E	/* Timer Counter - Read in one instruction. */ 
 #define M6811_TCNT_LOW	0x0F
-#define M6811_TIC1_HIGH	0x10	/* Input Capture Registers */ 
+/* Input Capture Registers */ 
+#define M6811_TIC1_HIGH	0x10	
 #define M6811_TIC1_LOW	0x11
 #define M6811_TIC2_HIGH	0x12
 #define M6811_TIC2_LOW	0x13
 #define M6811_TIC3_HIGH	0x14
 #define M6811_TIC3_LOW	0x15
+/* Output Capture Registers */
+#define M6811_TOC1_HIGH	0x16	
+#define M6811_TOC1_LOW	0x17
+#define M6811_TOC2_HIGH	0x18
+#define M6811_TOC2_LOW	0x19
+#define M6811_TOC3_HIGH	0x1A
+#define M6811_TOC3_LOW	0x1B
+#define M6811_TOC4_HIGH	0x1C
+#define M6811_TOC4_LOW	0x1D
+#define M6811_TOC5_HIGH	0x1E
+#define M6811_TOC5_LOW	0x1F
 
 
 
@@ -44,22 +54,16 @@ TOF: Overflow has occurred.
 /* Flags of the SCSR register.  */
 #define M6811_TDRE	0x80	/* Transmit Data Register Empty */
 
-/* Flags of the BAUD register.  */
-#define M6811_SCP1	0x20	/* SCI Baud rate prescaler select */
-#define M6811_SCP0	0x10
-#define M6811_SCR2	0x04	/* SCI Baud rate select */
-#define M6811_SCR1	0x02
-#define M6811_SCR0	0x01
+/* Bit Masks */
+#define M6811_BIT7	0x80
+#define M6811_BIT6	0x40	
+#define M6811_BIT5	0x20	
+#define M6811_BIT4	0x10
+#define M6811_BIT3	0x08
+#define M6811_BIT2	0x04	
+#define M6811_BIT1	0x02
+#define M6811_BIT0	0x01
 
-#define M6811_BAUD_DIV_1	(0)
-#define M6811_BAUD_DIV_3	(M6811_SCP0)
-#define M6811_BAUD_DIV_4	(M6811_SCP1)
-#define M6811_BAUD_DIV_13	(M6811_SCP1|M6811_SCP0)
-
-#define M6811_DEF_BAUD M6811_BAUD_DIV_4 /* 1200 baud */
-
-/* The I/O registers are represented by a volatile array.
-   Address is fixed at link time.  For this particular example,
-   the _io_ports address is defined in the `memory.x' file.  */
-extern volatile unsigned short __attribute__((section("ports"))) Ports[];
+/* Address is defined in the `memory.x' file.  */
+volatile unsigned short __attribute__((section("ports"))) Ports[];
 

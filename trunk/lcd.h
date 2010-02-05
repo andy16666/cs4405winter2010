@@ -3,6 +3,6 @@
 
 void sys_print_lcd(char* text);
 
-void _sys_init_lcd(void);
+void sys_init_lcd(void);
 
 #endif
