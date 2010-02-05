@@ -7,15 +7,9 @@
 #include "interrupts.h"
 #include "lcd.h"
 
-#define MAX_CHAR_COUNT 16 
-#define RESETV	(*(interrupt_t *)(0xBFC0 + 0x3E))
+#define MAX_CHAR_COUNT 16
 
-
-void sys_send_command_lcd(unsigned short operation, unsigned short operand) {
-	static unsigned short operation_temp;
-	static unsigned short operand_temp;
-	operation_temp = operation; 
-	operand_temp   = operand; 
+void sys_send_command_lcd(unsigned char operation, unsigned char operand) {
 	asm volatile(
 		"ldx	#4096        \n"  /* $1000 = Port-base.  */ 
 		"bclr	0,X	#16  \n"
@@ -39,7 +33,7 @@ void sys_send_command_lcd(unsigned short operation, unsigned short operand) {
 		"beq	wait         \n"  
 	"Done:	bset	60,X	#32  \n"
 		: 
-		: [operation] "m" (&operation_temp), [operand] "m" (&operand_temp) 
+		: [operation] "m" (&operation), [operand] "m" (&operand) 
 		: "x","y","a","b","memory"   
 	);
 }
@@ -53,7 +47,7 @@ void sys_print_lcd(char* text) {
 	for (k = 1; k != 0; k++); 
 	
 	for (i = 0; text[i] && i < MAX_CHAR_COUNT; i++) {
-		sys_send_command_lcd(2,(unsigned short)text[i]);
+		sys_send_command_lcd(2,text[i]);
 	}	
 }
 
@@ -72,17 +66,13 @@ void _Main(void)
   while (1)
   {
     sys_print_lcd(ken);
-    for(i = 1; i != 0; i++);
-    for(i = 1; i != 0; i++);
-    for(i = 1; i != 0; i++);
-    for(i = 1; i != 0; i++);
+    for(i = 1; i != 0; i++); for(i = 1; i != 0; i++); for(i = 1; i != 0; i++); for(i = 1; i != 0; i++);
     sys_print_lcd(joey);
     for(i = 1; i != 0; i++);
     for(i = 1; i != 0; i++);
     for(i = 1; i != 0; i++);
     for(i = 1; i != 0; i++);
-  }
-	
+  }	
   return;
 }
 
@@ -96,8 +86,8 @@ void _Main(void)
  * int:  some ANSI spec requires a return from main 
  */
 int main(void) {
-	RESETV = (interrupt_t)&_Main; 	/* register the reset handler */
-	while(1);			/* hang around */
+	IV.Reset = _Main; /* register the reset handler */
+	while(1);         /* hang around */
 	return 0;	
 }
 
