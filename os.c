@@ -142,16 +142,16 @@ void OS_Init(void) {
 	IV.TOI = ClockUpdateHandler;
 
 	/* Set the timer prescale factor to 16 (1,1)...Must be set very soon after startup!!! */
-	Ports[M6811_TMSK2] |= M6811_BIT0;
-	Ports[M6811_TMSK2] |= M6811_BIT1;
+	Ports[M6811_TMSK2] SET_BIT(M6811_BIT0);
+	Ports[M6811_TMSK2] SET_BIT(M6811_BIT1);
 	/* TODO: Make sure this calculation is correct. */ 
 	TimeQuantum = (M6811_CPU_HZ/16)/1000;
 
 	/* Enable TOI */ 
-	Ports[M6811_TMSK2] |= M6811_BIT7;
+	Ports[M6811_TMSK2] SET_BIT(M6811_BIT7);
 	
 	/* Unmask OC4 interrupt */
-	Ports[M6811_TMSK1] |= M6811_BIT4;
+	Ports[M6811_TMSK1] SET_BIT(M6811_BIT4);
 }
  
 /* Actually start the OS */
@@ -360,7 +360,7 @@ void ClockUpdate(void) {
 	/* Check for TOF flag indicating an overflow condition. */ 
 	if (Ports[M6811_TFLG2] & M6811_BIT7) {
 		/* Clear the overflow condition. */ 
-		Ports[M6811_TFLG2] &= ~M6811_BIT7;
+		Ports[M6811_TFLG2] CLR_BIT(M6811_BIT7);
 	}
 
 	if (last_timer_value > timer_value) {
