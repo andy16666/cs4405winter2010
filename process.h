@@ -17,6 +17,7 @@
 
 typedef enum
 {
+	new,
 	ready,
 	running,
 	zombie,
