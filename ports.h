@@ -1,4 +1,19 @@
+#define SET_BIT(x)  |= x
+#define CLR_BIT(x)  &= ~x
+
 /* Part 1:  68HC11 Definitions. */
+#define M6811_PORTA	0x00
+
+#define M6811_PIOC	0x02    /* STAF:STAI:CWOM:HNDS:OIN:PLS:EGA:INVB */
+#define M6811_PORTC	0x03
+#define M6811_PORTB	0x04
+#define M6811_PORTCL	0x05
+
+#define M6811_DDRC	0x07
+#define M6811_PORTD	0x08
+#define M6811_DDRD	0x09
+#define M6811_PORTE	0x0A
+
 
 
 /* Timing */ 
@@ -11,6 +26,7 @@
 #define M6811_TIC2_LOW	0x13
 #define M6811_TIC3_HIGH	0x14
 #define M6811_TIC3_LOW	0x15
+
 /* Output Capture Registers */
 #define M6811_TOC1_HIGH	0x16	
 #define M6811_TOC1_LOW	0x17
