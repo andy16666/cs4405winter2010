@@ -17,6 +17,7 @@
 #define M6811_CPU_HZ 4000000 
 
 typedef volatile unsigned long time_t; 
+
 /* 
   Process Table 
 */
@@ -50,7 +51,6 @@ void ContextSwitchToKernel(void);  /* Perform a context switch to PKernel  */
 
 /* Internal process management helpers. */ 
 void ClockUpdate(void); 
-void ContextSwitch(short *CurrentSP); 
 void SwitchToProcess(void); 
 void ReturnToKernel(void); 
 BOOL IsDevPReady(process *p); 
@@ -62,6 +62,7 @@ void SetPreemptionTimerInterval(unsigned int miliseconds);
 
 /* Processes */ 
 void Idle (void); 
+void TestProcess (void); 
 
 /* Access all ports through this array */ 
 //volatile unsigned short Ports[];
@@ -94,7 +95,7 @@ int main(int argc, char **argv) {
 	int PPP[]    = {-1,10}; 
 	int PPPMax[] = {10,3}; 
 
-	OS_Create(Idle,0,DEVICE,10);
+	OS_Create(TestProcess,0,DEVICE,10);
 	OS_Create(Idle,0,SPORADIC,13412);  
 	OS_Create(Idle,0,PERIODIC,10);  
 	
@@ -269,12 +270,12 @@ PID OS_Create(void (*f)(void), int arg, unsigned int level, unsigned int n) {
 	process *p; 
 	int i; 
 	
-	OS_DI(); 
+	
 	/* Find an available process control block */ 
 	for (i = 0; i < MAXPROCESS; i++) { 
 		p = &P[i];
-		if (p->pid == INVALIDPID) {
-			p->pid = i+1; 		
+		if (p->pid == INVALIDPID) {	
+			p->pid = i+1; 
 			break; 
 		}
 	} 
@@ -293,7 +294,7 @@ PID OS_Create(void (*f)(void), int arg, unsigned int level, unsigned int n) {
 	if      (p->Level == SPORADIC) { SpoP = QueueAdd(p, SpoP); }
 	/* Add Device Processes to the Device Queue */ 
 	else if (p->Level == DEVICE)   { DevP = QueueAdd(p, DevP); }
-	OS_EI();
+	
 	return p->pid; 
 }
  
@@ -327,10 +328,31 @@ int OS_GetParam() {
 	return PCurrent->Arg; 
 }
 
+/* Performs a context switch, saving the given current stack pointer. 
+	Used ONLY by:
+		- ContextSwitchToKernel 
+		- ContextSwitchToProcess
+   This function creates a black hole within which we can perform a 
+   context switch without it affecting the calling process. 
+*/ 
+
 /* Called directly to transfer control to the kernel, saving current context. */ 
-void ContextSwitchToKernel(void)  { OS_DI(); ContextSwitch(PCurrent->SP); }
+void ContextSwitchToKernel(void)  { 
+	OS_DI(); 
+	/* Store the stack pointer in the given location. */ 
+	asm volatile (" sts %0 " : "=m" (PCurrent->SP) : : "memory"); 
+	/* Interrupt to a SwitchToProcess() or ReturnToKernel() ISRs. */ 
+	asm volatile (" swi "); 
+	/* This function returns when rti is called. */
+}
 /* Called directly to transfer control to PCurrent, saving current context. */ 
-void ContextSwitchToProcess(void) { ContextSwitch(PKernel.SP); }
+void ContextSwitchToProcess(void) { 
+    /* Store the stack pointer in the given location. */ 
+	asm volatile (" sts %0 " : "=m" (PKernel.SP) : : "memory"); 
+	/* Interrupt to a SwitchToProcess() or ReturnToKernel() ISRs. */ 
+	asm volatile (" swi "); 
+	/* This function returns when rti is called. */
+}
 
 
 /* Interrupt service routine for updating the clock. */ 
@@ -500,19 +522,21 @@ void SwitchToProcess(void) {
 	}
 }
 
-/* Performs a context switch, saving the given current stack pointer. 
-	Used ONLY by:
-		- ContextSwitchToKernel 
-		- ContextSwitchToProcess
-   This function creates a black hole within which we can perform a 
-   context switch without it affecting the calling process. 
-*/ 
-void ContextSwitch(short *CurrentSP) {
-	/* Store the stack pointer in the given location. */ 
-	asm volatile (" sts %0 " : "=m" (CurrentSP) : : "memory"); 
-	/* Interrupt to a SwitchToProcess() or ReturnToKernel() ISRs. */ 
-	asm volatile (" swi "); 
-	/* This function returns when rti is called. */
-	return; 
+void TestProcess (void) {
+	unsigned int i; 
+	
+	for(i = 1; i != 0; i++);
+    for(i = 1; i != 0; i++);
+    for(i = 1; i != 0; i++);
+    for(i = 1; i != 0; i++);
+	
+	OS_Yield(); 
+	
+	for(i = 1; i != 0; i++);
+    for(i = 1; i != 0; i++);
+    for(i = 1; i != 0; i++);
+    for(i = 1; i != 0; i++);
+	
+	OS_Yield(); 
 }
 
