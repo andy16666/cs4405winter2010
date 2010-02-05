@@ -11,7 +11,11 @@
 #define RESETV	(*(interrupt_t *)(0xBFC0 + 0x3E))
 
 
-void sys_send_command_lcd(unsigned static short operation, unsigned static short operand) {
+void sys_send_command_lcd(unsigned short operation, unsigned short operand) {
+	static unsigned short operation_temp;
+	static unsigned short operand_temp;
+	operation_temp = operation; 
+	operand_temp   = operand; 
 	asm volatile(
 		"ldx	#4096        \n"  /* $1000 = Port-base.  */ 
 		"bclr	0,X	#16  \n"
@@ -35,7 +39,7 @@ void sys_send_command_lcd(unsigned static short operation, unsigned static short
 		"beq	wait         \n"  
 	"Done:	bset	60,X	#32  \n"
 		: 
-		: [operation] "m" (&operation), [operand] "m" (&operand) 
+		: [operation] "m" (&operation_temp), [operand] "m" (&operand_temp) 
 		: "x","y","a","b","memory"   
 	);
 }

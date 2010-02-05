@@ -1,5 +1,7 @@
+#include "interrupts.h"
+
 /* The interrupt vector. */ 
-extern volatile struct interrupt_vectors __attribute__((section("vectors"))) IV = {
+volatile struct interrupt_vectors __attribute__((section("vectors"))) IV = {
    unused0:                UnhandledInterrupt,
    unused1:                UnhandledInterrupt,
    unused2:                UnhandledInterrupt,
@@ -15,7 +17,7 @@ extern volatile struct interrupt_vectors __attribute__((section("vectors"))) IV 
    spi_handler:            UnhandledInterrupt, /* spi - unused */
    acc_overflow_handler:   UnhandledInterrupt, /* acc overflow - right shaft encoder - calib */
    acc_input_handler:      UnhandledInterrupt, /* acc input - right shaft encoder - turning */
-   timer_overflow_handler: UnhandledInterrupt, /* timer overflow handler */
+   TOI:                    UnhandledInterrupt, /* Timer Overflow Interrupt = Used for RTC */
    OC5:                    UnhandledInterrupt, /* out compare 5 - sound */
    OC4:                    UnhandledInterrupt, /* Output Compare 4 (OC4) Preemption */
    OC3:                    UnhandledInterrupt, /* out compare 3 - unused */
@@ -35,5 +37,5 @@ extern volatile struct interrupt_vectors __attribute__((section("vectors"))) IV 
 };
 
 void UnhandledInterrupt(void) {	
-	/* Do Nothing. */ 
+	return; /* Do Nothing. */ 
 }
