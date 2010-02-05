@@ -63,6 +63,8 @@ TOF: Overflow has occurred.
 #define M6811_SCSR	0x2E	/* SCI Status register */
 #define M6811_SCDR	0x2F	/* SCI Data (Read => RDR, Write => TDR) */
 
+#define M6811_HPRIO	0x3C    /* RBOOT:SMOD:MDA:IRV:PSEL3:PSEL2:PSEL1:PSEL0 */ 
+
 /* Flags of the SCCR2 register.  */
 #define M6811_TE	0x08	/* Transmit Enable */
 #define M6811_RE	0x04	/* Receive Enable */
