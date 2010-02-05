@@ -8,25 +8,26 @@
  *	Andrew Somerville <z19ar@unb.ca>
  */
  
-#include "os.h"
-#include "fifo.h"
-#include "interrupts.h"
-#include "ports.h"
 
-typedef volatile unsigned long long time_t; 
+#include "fifo.h"
+#include "interrupts.c"
+#include "ports.h"
+#include "os.h"
+
+#define M6811_CPU_HZ 4000000 
+
+typedef volatile unsigned long time_t; 
 /* 
   Process Table 
 */
 typedef struct proc_struct {
-	PID pid;  	                   /* Process ID. */ 
+	PID pid;  	               /* Process ID. */ 
 	unsigned int Name;             /* Name of process */ 
 	unsigned int Level;            /* Scheduling level/queue */ 
 	int   Arg;                     /* Process argument */ 
 	short Stack[WORKSPACE]; 
 	short *SP;                     /* Last Stack Pointer */ 
-	short *ISP;              /* Initial Stack Pointer */ 
-	interrupt_t  SwiHandler;       /* Interrupt vector for this process. */ 
-	interrupt_t  OC4Handler;                                             
+	short *ISP;                    /* Initial Stack Pointer */ 
 	void(*program_location)(void); /* Pointer to the process, to start it for the first time. */ 
 	BOOL running;                  /* Indicates if the process has been started yet. */ 
 
@@ -38,94 +39,64 @@ typedef struct proc_struct {
 
 typedef struct kernel_struct {
 	short *SP;                     /* Last Stack Pointer */ 
-	interrupt_t SwiHandler;        /* Interrupt vector for the kernel. */ 
 } kernel; 
 
-/* Interrupt Service Handlers */ 
-void Idle (void); 
-void ClockTick(void); 
-void UnhandledInterrupt(void); 
+/* Safe Interrupt Service Handlers */
+void ClockUpdateHandler (void) __attribute__((interrupt)); 
+
+
+void ContextSwitchToProcess(void); /* Perform a context switch to PCurrent */ 
+void ContextSwitchToKernel(void);  /* Perform a context switch to PKernel  */
+
+/* Internal process management helpers. */ 
+void ClockUpdate(void); 
+void ContextSwitch(short *CurrentSP); 
 void SwitchToProcess(void); 
 void ReturnToKernel(void); 
-
-/* Process management helpers. */ 
-void ContextSwitch(short *SP); 
 BOOL IsDevPReady(process *p); 
 process *GetPeriodicProcessByName(unsigned int n); 
 process *QueueAdd(process *p, process *Queue);
-process *QueueRemove(process *p, process *Queue);  
+process *QueueRemove(process *p, process *Queue);
+void SetPreemptionTime(time_t time);   
+void SetPreemptionTimerInterval(unsigned int miliseconds); 
 
+/* Processes */ 
+void Idle (void); 
 
-extern volatile unsigned short __attribute__((section("ports"))) Ports[];
+/* Access all ports through this array */ 
+//volatile unsigned short Ports[];
+//volatile struct interrupt_vectors IV; 
 
-/* The interrupt vector. */ 
-volatile struct interrupt_vectors __attribute__((section("vectors"))) IV = {
-   unused0:                UnhandledInterrupt,
-   unused1:                UnhandledInterrupt,
-   unused2:                UnhandledInterrupt,
-   unused3:                UnhandledInterrupt,
-   unused4:                UnhandledInterrupt,
-   unused5:                UnhandledInterrupt,
-   unused6:                UnhandledInterrupt,
-   unused7:                UnhandledInterrupt,
-   unused8:                UnhandledInterrupt,
-   unused9:                UnhandledInterrupt, 
-   unused10:               UnhandledInterrupt, /* unused interrupt handlers */
-   sci_handler:            UnhandledInterrupt, /* sci - unused */
-   spi_handler:            UnhandledInterrupt, /* spi - unused */
-   acc_overflow_handler:   UnhandledInterrupt, /* acc overflow - right shaft encoder - calib */
-   acc_input_handler:      UnhandledInterrupt, /* acc input - right shaft encoder - turning */
-   timer_overflow_handler: UnhandledInterrupt, /* timer overflow handler */
-   output5_handler:        UnhandledInterrupt, /* out compare 5 - sound */
-   output4_handler:        UnhandledInterrupt, /* out compare 4 - unused */
-   output3_handler:        UnhandledInterrupt, /* out compare 3 - unused */
-   output2_handler:        UnhandledInterrupt, /* out compare 2 - unused */
-   output1_handler:        UnhandledInterrupt, /* out compare 1 - unused */
-   capture3_handler:       UnhandledInterrupt, /* in capt 3 -left shaft encoder -calib & turning*/
-   capture2_handler:       UnhandledInterrupt, /* in capt 2 - unused */
-   capture1_handler:       UnhandledInterrupt, /* in capt 1 - unused */
-   irq_handler:            UnhandledInterrupt, /* IRQ - unused */
-   xirq_handler:           UnhandledInterrupt, /* XIRQ - unused */
-   swi_handler:            UnhandledInterrupt, /* swi - unused */
-   illegal_handler:        UnhandledInterrupt, /* illegal -unused */
-   cop_fail_handler:       UnhandledInterrupt, /* unused */
-   cop_clock_handler:      UnhandledInterrupt, /* unused */
-   rtii_handler:           ReturnToKernel, /* rti - task switching / timer */
-   reset_handler:          UnhandledInterrupt /* reset vector - go to premain */
-};
+process P[MAXPROCESS]; /* Main process table.    */ 
+process *PCurrent;     /* Last Process to run    */ 
+process *DevP;         /* Device Process Queue   */ 
+process *SpoP;         /* Sproatic Process Queue */
 
 process IdleProcess; 
-
-process P[MAXPROCESS]; /* Main process table. */ 
-
-process *PCurrent;     /* Last Process to run */ 
-process *DevP;         /* Device Process Queue */ 
-process *SpoP;         /* Sproatic Process Queue */
+kernel  PKernel;
 
 int PPPLen;
 int PPP[MAXPROCESS]; 
 int PPPMax[MAXPROCESS];
 
-kernel PKernel;
-
 fifo_t Fifos[MAXFIFO]; /* FIFOs */
 
-time_t Clock;          /* Approximate time since system start in ms. */ 
-time_t TimeQuantum; 
+time_t Clock;             /* Approximate time since system start in ms. */ 
+unsigned int TimeQuantum; /* Ticks per ms */ 
 
-/* 
-  Kernel entry point 
-*/
-int main() {	
+
+int main(int argc, char **argv) {	
 	/* Set Prescale Rate */	
-
+	OS_DI(); 
 	OS_Init();
 
 	int PPPLen   = 2;
-	int PPP[]    = {-1,-1}; 
+	int PPP[]    = {-1,10}; 
 	int PPPMax[] = {10,3}; 
 
-	/* Create processes here */
+	OS_Create(Idle,0,DEVICE,10);
+	OS_Create(Idle,0,SPORADIC,13412);  
+	OS_Create(Idle,0,PERIODIC,10);  
 	
 	OS_Start(); 
 
@@ -136,10 +107,12 @@ int main() {
 void OS_Init(void) {	
 	int i; 
 
-	Clock = 0;
-	DevP = 0;
-	SpoP = 0; 
+	Clock    = 0;
+	DevP     = 0;
+	SpoP     = 0; 
 	PCurrent = 0; 
+
+	PKernel.SP = 0; 
 	
 	/* TODO: Set up kernel process. */ 
 	/* TODO: Set Kernel Interrupt Vector: PKernel.IV = */
@@ -162,23 +135,40 @@ void OS_Init(void) {
 	IdleProcess.pid  = INVALIDPID; 
 	IdleProcess.Name = IDLE; 
 	IdleProcess.ISP  = &(IdleProcess.Stack[WORKSPACE-1]);
-	IdleProcess.SP   = IdleProcess.ISP; 
-	/* TODO: Set IdleProcess.IV  =  */ 
 	IdleProcess.program_location = &Idle; 
-	IdleProcess.running = FALSE; 
+	IdleProcess.running = FALSE;
+
+	/* When the hardware pulse accumulator overflows, update the clock, clearing the overflow. */ 
+	IV.TOI = ClockUpdateHandler;
+
+	/* Set the timer prescale factor to 16 (1,1)...Must be set very soon after startup!!! */
+	Ports[M6811_TMSK2] |= M6811_BIT0;
+	Ports[M6811_TMSK2] |= M6811_BIT1;
+	/* TODO: Make sure this calculation is correct. */ 
+	TimeQuantum = (M6811_CPU_HZ/16)/1000;
+
+	/* Enable TOI */ 
+	Ports[M6811_TMSK2] |= M6811_BIT7;
+	
+	/* Unmask OC4 interrupt */
+	Ports[M6811_TMSK1] |= M6811_BIT4;
 }
  
 /* Actually start the OS */
-void OS_Start(void)
-{
+void OS_Start(void) {
 	process *p; 
 	time_t t;         /* Time to interrupt. */ 
 	int ppp_next;     /* Queue index of the next periodic process. */ 
 
 	ppp_next = 0; 
 
-	/* Scheduler */ 
+	IV.SWI = SwitchToProcess; 
+
+	/* Scheduler. */ 
 	while (1) {
+		/* Syncronize the software clock with the hardware clock. */ 
+		ClockUpdate(); 
+
 		PCurrent = 0;
 		p = 0; 
 		t = 0;  
@@ -196,9 +186,9 @@ void OS_Start(void)
 			if (PCurrent) {
 				PCurrent->DevNextRunTime += (time_t)(PCurrent->Name); 
 				/* Store Kernel Stack pointer and do a Context Switch*/ 
-				ContextSwitch(PKernel.SP); 
+				ContextSwitchToProcess(); 
 				continue; 
-			}
+			}			
 			/* Find the time of the next device process, t. */ 
 			else {
 				p = DevP; 
@@ -227,8 +217,8 @@ void OS_Start(void)
 
 			/* If a periodic process is ready to run, run it. */ 
 			if (PCurrent) {
-				/* TODO: Set up and OC4 interrupt at time t */
-				ContextSwitch(PKernel.SP); 
+				SetPreemptionTime(t);
+				ContextSwitchToProcess(); 
 				continue; 
 			}
 		}
@@ -238,17 +228,17 @@ void OS_Start(void)
 		if (SpoP) {
 			PCurrent = SpoP; 
 			if (t) {
-				/* TODO: Set up an OC4 interrupt at time t */
+				SetPreemptionTime(t);
 			}	
-			ContextSwitch(PKernel.SP); 
+			ContextSwitchToProcess(); 
 			continue; 
 		}
 		
 		/* We're here so we must be idle and there must be no sporatic processes to run. */ 
 		if (t) {
-			/* TODO: Set up an OC4 interrupt at time t */
+			SetPreemptionTime(t);
 			PCurrent = &IdleProcess;
-			ContextSwitch(PKernel.SP); 			
+			ContextSwitchToProcess(); 			
 			continue; 
 		}
 	} 
@@ -257,7 +247,16 @@ void OS_Start(void)
 void OS_Abort() {
 	asm(" stop "); 
 }
- 
+
+/* Set OC4 to interrupt at a specific absolute time in the future. */ 
+void SetPreemptionTime(time_t time) {
+	SetPreemptionTimerInterval((unsigned int)(time - Clock)); 
+}
+
+/* Set OC4 to interrupt in a number of miliseconds. */ 
+void SetPreemptionTimerInterval(unsigned int miliseconds) {
+	Ports[M6811_TOC4_HIGH] = (Ports[M6811_TCNT_HIGH] + (unsigned int)(miliseconds * TimeQuantum)) % 0xFFFF; 
+}
 
 PID OS_Create(void (*f)(void), int arg, unsigned int level, unsigned int n) {	
 	process *p; 
@@ -280,8 +279,6 @@ PID OS_Create(void (*f)(void), int arg, unsigned int level, unsigned int n) {
 
 	p->DevNextRunTime = 0; 
 
-	/* Set the stack pointer to the initial stack pointer. */ 
-	p->SP = p->ISP; 
 	/* Set the initial program counter to the address of the function representing the process. */ 
 	p->program_location = f;
 
@@ -289,7 +286,7 @@ PID OS_Create(void (*f)(void), int arg, unsigned int level, unsigned int n) {
 	if      (p->Level == SPORADIC) { SpoP = QueueAdd(p, SpoP); }
 	/* Add Device Processes to the Device Queue */ 
 	else if (p->Level == DEVICE)   { DevP = QueueAdd(p, DevP); }
-	
+	OS_EI();
 	return p->pid; 
 }
  
@@ -301,18 +298,20 @@ void OS_Terminate() {
 	if      (PCurrent->Level == SPORADIC) { SpoP = QueueRemove(PCurrent, SpoP); } 
 	/* Remove the process from the DEVICE queue */
 	else if (PCurrent->Level == DEVICE)   { DevP = QueueRemove(PCurrent, DevP); }
-	
 	/* TODO: Release Semiphores  */
+	
+	/* Return to the kernel without saving the context. */ 
 	ReturnToKernel(); 
 } 
 
 void OS_Yield() {
+	/* Move sporatic process to the end of the Queue */ 
 	if (PCurrent->Level == SPORADIC) { 
 		if (SpoP->QueueNext) {
 			SpoP = SpoP->QueueNext; 
 		}
 	} 
-	ContextSwitch(PCurrent->SP); 
+	ContextSwitchToKernel(); 
 }
 
 
@@ -321,13 +320,60 @@ int OS_GetParam() {
 	return PCurrent->Arg; 
 }
 
-void ContextSwitch(short *SP) {
-	/* Store the stack pointer in the given location. */ 
-	asm volatile (" sts %0 " : "=m" (SP) : : "memory"); 
-	/* Interrupt to a new context. */ 
-	asm volatile (" swi "); 
+/* Called directly to transfer control to the kernel, saving current context. */ 
+void ContextSwitchToKernel(void)  { OS_DI(); ContextSwitch(PCurrent->SP); }
+/* Called directly to transfer control to PCurrent, saving current context. */ 
+void ContextSwitchToProcess(void) { ContextSwitch(PKernel.SP); }
+
+
+/* Interrupt service routine for updating the clock. */ 
+void ClockUpdateHandler (void) { 
+	OS_DI(); 
+	ClockUpdate(); 
+	OS_EI(); 
 }
- 
+
+/* 
+   Syncronize the software clock with the hardware tick counter. 
+   ASSUMPTIONS: 
+	- That no more than one overflow occurs between updates. 
+	- That interrupts are disabled when this function is called. 
+*/ 
+void ClockUpdate(void) {
+	unsigned int elapsed_time; 
+	unsigned int timer_value; 
+	static unsigned int residual = 0; 
+	static unsigned int last_timer_value = 0;
+	
+	/* Read the timer from the tick register. */ 
+	timer_value = (unsigned int)Ports[M6811_TCNT_HIGH];
+
+	/* Check for TOF flag indicating an overflow condition. */ 
+	if (Ports[M6811_TFLG2] & M6811_BIT7) {
+		/* Clear the overflow condition. */ 
+		Ports[M6811_TFLG2] &= ~M6811_BIT7;
+	}
+
+	if (last_timer_value > timer_value) {
+		elapsed_time = (0xFFFF - last_timer_value) + timer_value; 
+	} else {
+		elapsed_time = timer_value - last_timer_value;
+	}
+
+	/* Add on the residual from the last update. */ 
+	elapsed_time += residual; 
+
+	residual = elapsed_time % TimeQuantum; 
+
+	Clock += (elapsed_time-residual)/TimeQuantum; 
+
+	/* Account for the residual during the next update. */ 
+	last_timer_value = timer_value; 
+}
+
+
+void Idle (void) { while (1); }
+
 BOOL IsDevPReady(process *p) {
 	if (p->DevNextRunTime <= Clock) { return TRUE; } 
 	else                            { return FALSE; }
@@ -395,37 +441,48 @@ process *QueueRemove(process *p, process *Queue) {
 	return Queue; 
 }
 
-/* Increments clock. Run by an interrupt every x ms. */ 
-void ClockTick(void) {
-	OS_DI(); 
-	Clock += TimeQuantum; /* TODO: Calculate time quantum */ 
-	OS_EI(); 
-}
 
+
+/* 
+   Directly return control to kernel. 
+   Called ONLY by:
+    - SWI from ContextSwitch() 
+    - OS_Terminate(). 
+*/ 
 void ReturnToKernel(void)  {
+	ClockUpdate(); 
 	OS_DI(); 	
-	/* TODO: Load Kernel Interrupt Vector */ 
-	
+	/* Reset interrupt handlers. */ 
+	IV.OC4 = 0; /* The kernel cannot be preempted. */ 
+	IV.SWI = SwitchToProcess; 
+
 	/* Load Kernel Stack Pointer */
 	asm volatile (" lds %0 " : : "m" (PKernel.SP) : "memory"); 
 	/* Return control to the kernel */ 
 	asm volatile (" rti "); 
 }
 
+/* Transfer control PCurrent. ONLY called by SWI from ContextSwitch() in kernel mode. */ 
 void SwitchToProcess(void) {
-	/* TODO: Load Process Interrupt Vector */ 	
+	/* Set interrupt handlers. */ 
+	IV.OC4 = ContextSwitchToKernel; /* If OC4 is triggered, save state and SWI */ 
+	IV.SWI = ReturnToKernel;
 	
+	/* If the process has already been running, we can return to its last context. */ 
 	if (PCurrent->running) {		
 		/* Load Process Stack Pointer */ 
 		asm volatile (" lds %0 " : : "m" (PCurrent->SP) : "memory"); 
 		/* Return control to running process. */ 
 		OS_EI();
 		asm volatile (" rti "); 
-	} else {
-		/* Start process for the first time. */
+	} 
+	/* If the process has not been started, we need to start it for the first time. */ 
+	else {
+		/* Set the process to the running state. */
 		PCurrent->running = TRUE; 
 		/* Load Process Stack Pointer */ 
-		asm volatile (" lds %0 " : : "m" (PCurrent->SP) : "memory"); 
+		asm volatile (" lds %0 " : : "m" (PCurrent->ISP) : "memory"); 
+		/* Run process for the first time. */
 		OS_EI();
 		PCurrent->program_location();
 		OS_DI();
@@ -434,11 +491,19 @@ void SwitchToProcess(void) {
 	}
 }
 
-void UnhandledInterrupt(void) {
-	/* Do Nothing. */
-}
-
-void Idle (void) {
-	while (1); 
+/* Performs a context switch, saving the given current stack pointer. 
+	Used ONLY by:
+		- ContextSwitchToKernel 
+		- ContextSwitchToProcess
+   This function creates a black hole within which we can perform a 
+   context switch without it affecting the calling process. 
+*/ 
+void ContextSwitch(short *CurrentSP) {
+	/* Store the stack pointer in the given location. */ 
+	asm volatile (" sts %0 " : "=m" (CurrentSP) : : "memory"); 
+	/* Interrupt to a SwitchToProcess() or ReturnToKernel() ISRs. */ 
+	asm volatile (" swi "); 
+	/* This function returns when rti is called. */
+	return; 
 }
 
