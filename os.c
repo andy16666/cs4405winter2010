@@ -14,7 +14,7 @@
 #include "ports.h"
 #include "os.h"
 
-#define M6811_CPU_HZ 4000000 
+#define M6811_CPU_HZ 40000000 
 
 typedef volatile unsigned long time_t; 
 
@@ -44,6 +44,7 @@ typedef struct kernel_struct {
 
 /* Safe Interrupt Service Handlers */
 void ClockUpdateHandler (void) __attribute__((interrupt)); 
+void OC4Handler (void) __attribute__((interrupt)); 
 
 
 void ContextSwitchToProcess(void); /* Perform a context switch to PCurrent */ 
@@ -67,6 +68,7 @@ void HelloWorld (void);
 void Period (void); 
 void Third (void); 
 void PrintInit (void); 
+void Sporadic (void); 
 
 /* Access all ports through this array */ 
 //volatile unsigned short Ports[];
@@ -90,19 +92,11 @@ time_t Clock;             /* Approximate time since system start in ms. */
 unsigned int TimeQuantum; /* Ticks per ms */ 
 
 
-int main(int argc, char **argv) {	
-	unsigned int i;  
-	
+int main(int argc, char **argv) {		
 	OS_DI(); 
-	for(i = 1; i != 0; i++);
-	for(i = 1; i != 0; i++);  
-	for(i = 1; i != 0; i++); 
-	
-	
+		
 	OS_Init();
 
-
-	for(i = 1; i != 0; i++); 
 	
 
 	PPPLen   = 3;
@@ -110,14 +104,14 @@ int main(int argc, char **argv) {
 	PPP[1]    = 10;
 	PPP[2]    = 15;  
 	PPPMax[0] = 10; 
-	PPPMax[1] = 3; 
-	PPPMax[2] = 5;
+	PPPMax[1] = 10; 
+	PPPMax[2] = 10;
 
 	PrintInit(); 
 	OS_Create(Third,0,DEVICE,30000);
 	OS_Create(HelloWorld,0,DEVICE,10000);  
 	OS_Create(Period,0,PERIODIC,15);  
-	OS_Create(Idle,0,SPORADIC,10);  
+	OS_Create(Sporadic,0,SPORADIC,10);  
 	OS_DI(); 
 
 	OS_Start(); 
@@ -498,7 +492,10 @@ process *QueueRemove(process *p, process *Queue) {
 	return Queue; 
 }
 
-
+/* Preemption must be handled differently from traps to preserve local variables. */ 
+void OC4Handler(void) {
+	asm(" swi ");
+}
 
 /* 
    Directly return control to kernel. 
@@ -533,7 +530,7 @@ void SwitchToProcess(void) {
 	PKernel.SP++; 
 	PKernel.SP++;
 	/* Set interrupt handlers. */ 
-	IV.OC4 = ReturnToKernel; /* If OC4 is triggered */ 
+	IV.OC4 = OC4Handler; /* OC4 must jump out to a proper interrupt handler to preserve local variables. */ 
 	IV.SWI = ReturnToKernel;
 	
 	/* If the process has already been running, we can return to its last context. */ 
@@ -623,31 +620,45 @@ void Third (void) {
 }
 
 void Period (void) {
-  char msg[7]; 
+  char *msg = "Periodic Process!!!"; 
   int i = 0; 
-  int len = 7;
-
-	msg[0] = 'P'; 
-	msg[1] = 'e'; 
-	msg[2] = 'r'; 
-	msg[3] = 'i'; 
-	msg[4] = 'o'; 
-	msg[5] = 'd'; 
-	msg[6] = '!'; 
+  unsigned int j = 0;
+  int len = 18;
 
   while (1) {
-          
-	  OS_DI();
 	for (i = 0; i < len; i++) {
+		for(j = 1; j != 0; j++);
+		OS_DI();
 		/* Wait until the SIO has finished to send the character.  */
 		while (!(Ports[M6811_SCSR] & M6811_TDRE))
 		  continue;
 	
 		Ports[M6811_SCDR] = msg[i];
 		Ports[M6811_SCCR2] |= M6811_TE;
-	
+	        OS_EI();	
 	  }
-          OS_EI();
+
 	}
 }
 
+void Sporadic (void) {
+  char *msg = "Sporadic!"; 
+  int i = 0; 
+  unsigned int j = 0;
+  int len = 9;
+
+  while (1) {
+	for (i = 0; i < len; i++) {
+		for(j = 1; j != 0; j++);
+		OS_DI();
+		/* Wait until the SIO has finished to send the character.  */
+		while (!(Ports[M6811_SCSR] & M6811_TDRE))
+		  continue;
+	
+		Ports[M6811_SCDR] = msg[i];
+		Ports[M6811_SCCR2] |= M6811_TE;
+	        OS_EI();	
+	  }
+
+	}
+}
