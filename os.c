@@ -26,9 +26,9 @@ typedef struct proc_struct {
 	unsigned int Name;             /* Name of process */ 
 	unsigned int Level;            /* Scheduling level/queue */ 
 	int   Arg;                     /* Process argument */ 
-	short Stack[WORKSPACE]; 
-	short *SP;                     /* Last Stack Pointer */ 
-	short *ISP;                    /* Initial Stack Pointer */ 
+	char Stack[WORKSPACE]; 
+	char *SP;                     /* Last Stack Pointer */ 
+	char *ISP;                    /* Initial Stack Pointer */ 
 	void(*program_location)(void); /* Pointer to the process, to start it for the first time. */ 
 	BOOL running;                  /* Indicates if the process has been started yet. */ 
 
@@ -39,7 +39,7 @@ typedef struct proc_struct {
 } process;
 
 typedef struct kernel_struct {
-	short *SP;                     /* Last Stack Pointer */ 
+	char *SP;                     /* Last Stack Pointer */ 
 } kernel; 
 
 /* Safe Interrupt Service Handlers */
@@ -53,7 +53,6 @@ void ContextSwitchToKernel(void);  /* Perform a context switch to PKernel  */
 void ClockUpdate(void); 
 void SwitchToProcess(void); 
 void ReturnToKernel(void); 
-BOOL IsDevPReady(process *p); 
 process *GetPeriodicProcessByName(unsigned int n); 
 process *QueueAdd(process *p, process *Queue);
 process *QueueRemove(process *p, process *Queue);
@@ -62,7 +61,12 @@ void SetPreemptionTimerInterval(unsigned int miliseconds);
 
 /* Processes */ 
 void Idle (void); 
-void TestProcess (void); 
+void TestProcess (void);
+void PrintChar(void);
+void HelloWorld (void); 
+void Period (void); 
+void Third (void); 
+void PrintInit (void); 
 
 /* Access all ports through this array */ 
 //volatile unsigned short Ports[];
@@ -87,20 +91,35 @@ unsigned int TimeQuantum; /* Ticks per ms */
 
 
 int main(int argc, char **argv) {	
-	/* Set Prescale Rate */	
+	unsigned int i;  
+	
 	OS_DI(); 
+	for(i = 1; i != 0; i++);
+	for(i = 1; i != 0; i++);  
+	for(i = 1; i != 0; i++); 
+	
+	
 	OS_Init();
 
-	PPPLen   = 2;
-	PPP[0]    = -1;
-	PPP[1]    = 10; 
+
+	for(i = 1; i != 0; i++); 
+	
+
+	PPPLen   = 3;
+	PPP[0]    = IDLE;
+	PPP[1]    = 10;
+	PPP[2]    = 15;  
 	PPPMax[0] = 10; 
 	PPPMax[1] = 3; 
+	PPPMax[2] = 5;
 
-	OS_Create(TestProcess,0,DEVICE,100);
-	OS_Create(TestProcess,0,SPORADIC,13412);  
-	OS_Create(Idle,0,PERIODIC,10);  
-	
+	PrintInit(); 
+	OS_Create(Third,0,DEVICE,30000);
+	OS_Create(HelloWorld,0,DEVICE,10000);  
+	OS_Create(Period,0,PERIODIC,15);  
+	OS_Create(Idle,0,SPORADIC,10);  
+	OS_DI(); 
+
 	OS_Start(); 
 
 	return 0;
@@ -177,23 +196,23 @@ void OS_Start(void) {
 			p = DevP; 
 			/* Search for a Device process ready to run. */ 
 			do { 
-				if (IsDevPReady(p)) {
-					PCurrent = p; 
+				if (p->DevNextRunTime <= Clock) {
+					PCurrent = p;
+					break; 
 				}
-			} while ((p = DevP->QueueNext) && (p != DevP)); 
+			} while ((p = p->QueueNext) && (p != DevP)); 
 			
 			/* If a device process is ready, run it. */ 
-			if (PCurrent) {
-				PCurrent->DevNextRunTime += (time_t)(PCurrent->Name); 
-				/* Store Kernel Stack pointer and do a Context Switch*/ 
+			if (PCurrent) {	
 				ContextSwitchToProcess(); 
+				PCurrent->DevNextRunTime += (time_t)(PCurrent->Name);
 				continue; 
 			}			
 			/* Find the time of the next device process, t. */ 
 			else {
 				p = DevP; 
 				t = p->DevNextRunTime; 
-				while ((p = DevP->QueueNext) && (p != DevP)) { 
+				while ((p = p->QueueNext) && (p != DevP)) { 
 					if (p->DevNextRunTime < t) {
 						t = p->DevNextRunTime; 
 					}
@@ -259,8 +278,8 @@ void SetPreemptionTimerInterval(unsigned int miliseconds) {
 	unsigned int *timer_address; 
 	
 	/* Make sure these are read as 16 bit numbers. */ 
-	TOC4_address  = &(Ports[M6811_TOC4_HIGH]);
-	timer_address = &(Ports[M6811_TCNT_HIGH]);
+	TOC4_address  = (unsigned int*)&(Ports[M6811_TOC4_HIGH]);
+	timer_address = (unsigned int*)&(Ports[M6811_TCNT_HIGH]);
 	
 	*TOC4_address = (*timer_address + (miliseconds * TimeQuantum)); 
 
@@ -275,16 +294,21 @@ void SetPreemptionTimerInterval(unsigned int miliseconds) {
 PID OS_Create(void (*f)(void), int arg, unsigned int level, unsigned int n) {	
 	process *p; 
 	int i; 
+	BOOL can_create; 
 	
-	
+	OS_DI(); 
 	/* Find an available process control block */ 
+	can_create = FALSE; 
 	for (i = 0; i < MAXPROCESS; i++) { 
 		p = &P[i];
 		if (p->pid == INVALIDPID) {	
 			p->pid = i+1; 
+			can_create = TRUE; 
 			break; 
 		}
 	} 
+
+	if (!can_create) { OS_Abort(); }
 
 	p->Name       = n; 
 	p->Level      = level;
@@ -301,6 +325,7 @@ PID OS_Create(void (*f)(void), int arg, unsigned int level, unsigned int n) {
 	/* Add Device Processes to the Device Queue */ 
 	else if (p->Level == DEVICE)   { DevP = QueueAdd(p, DevP); }
 	
+	OS_EI(); 
 	return p->pid; 
 }
  
@@ -379,7 +404,7 @@ void ClockUpdate(void) {
 	static unsigned int last_timer_value = 0;
 	
 	/* Read the timer from the tick register as a single 16 bit number. */ 
-	timer_address = &Ports[M6811_TCNT_HIGH];
+	timer_address = (unsigned int *)&Ports[M6811_TCNT_HIGH];
 	timer_value = *timer_address;
 
 	/* Check for TOF flag indicating an overflow condition. */ 
@@ -408,10 +433,6 @@ void ClockUpdate(void) {
 
 void Idle (void) { while (1); }
 
-BOOL IsDevPReady(process *p) {
-	if (p->DevNextRunTime <= Clock) { return TRUE; } 
-	else                            { return FALSE; }
-}
 
 process *GetPeriodicProcessByName(unsigned int n) {
 	int i; 
@@ -442,6 +463,8 @@ process *QueueAdd(process *p, process *Queue) {
 		else {
 			Queue->QueueNext = p; 
 			Queue->QueuePrev = p;
+			p->QueueNext = Queue; 
+			p->QueuePrev = Queue;
 		}
 	} 
 	/* The graph has no existing nodes. */ 
@@ -489,6 +512,9 @@ void ReturnToKernel(void)  {
 	asm volatile (" sts %0 " : "=m" (PCurrent->SP) : : "memory"); 
 	/* Correct for function call. */
 	PCurrent->SP++; 
+	PCurrent->SP++;
+	/* Mask OC4 interrupts */
+	Ports[M6811_TMSK1] CLR_BIT(M6811_BIT4);
 	/* Reset interrupt handlers. */ 
 	IV.OC4 = 0; /* The kernel cannot be preempted. */ 
 	IV.SWI = SwitchToProcess; 
@@ -505,8 +531,9 @@ void SwitchToProcess(void) {
 	asm volatile (" sts %0 " : "=m" (PKernel.SP) : : "memory"); 
 	/* Correct for function call. */
 	PKernel.SP++; 
+	PKernel.SP++;
 	/* Set interrupt handlers. */ 
-	IV.OC4 = ReturnToKernel; /* If OC4 is triggered, save state and SWI */ 
+	IV.OC4 = ReturnToKernel; /* If OC4 is triggered */ 
 	IV.SWI = ReturnToKernel;
 	
 	/* If the process has already been running, we can return to its last context. */ 
@@ -531,15 +558,96 @@ void SwitchToProcess(void) {
 	}
 }
 
+
 void TestProcess (void) {
 	unsigned char i;  
 
 	while (1) {	
 		for(i = 1; i != 0; i++); 
 
-
+		OS_Create(HelloWorld,0,PERIODIC,15);  
 		
 		OS_Yield(); 
+	}
+}
+
+
+void PrintInit(void) {
+  /* Configure the SCI to send at M6811_DEF_BAUD baud.  */
+  Ports[M6811_BAUD] = M6811_DEF_BAUD;
+
+  /* Setup character format 1 start, 8-bits, 1 stop.  */
+  Ports[M6811_SCCR1] = 0;
+
+  /* Enable receiver and transmitter.  */
+  Ports[M6811_SCCR2] = M6811_TE | M6811_RE;
+}
+
+
+void HelloWorld (void) {
+  char *msg = "Hello world!\n";
+  char *msgp; 
+
+
+
+	while (1) {
+          msgp = msg; 
+	  while (*msgp != 0) {
+		/* Wait until the SIO has finished to send the character.  */
+		while (!(Ports[M6811_SCSR] & M6811_TDRE))
+		  continue;
+	
+		Ports[M6811_SCDR] = *msgp++;
+		Ports[M6811_SCCR2] |= M6811_TE;
+	  }
+	  OS_Yield(); 
+	}
+}
+
+void Third (void) {
+  char *msg = "1/3 as often!\n";
+  char *msgp; 
+
+	while (1) {
+          msgp = msg; 
+	  while (*msgp != 0) {
+		/* Wait until the SIO has finished to send the character.  */
+		while (!(Ports[M6811_SCSR] & M6811_TDRE))
+		  continue;
+	
+		Ports[M6811_SCDR] = *msgp++;
+		Ports[M6811_SCCR2] |= M6811_TE;
+	  }
+	  OS_Yield(); 
+	}
+}
+
+void Period (void) {
+  char msg[7]; 
+  int i = 0; 
+  int len = 7;
+
+	msg[0] = 'P'; 
+	msg[1] = 'e'; 
+	msg[2] = 'r'; 
+	msg[3] = 'i'; 
+	msg[4] = 'o'; 
+	msg[5] = 'd'; 
+	msg[6] = '!'; 
+
+  while (1) {
+          
+	  OS_DI();
+	for (i = 0; i < len; i++) {
+		/* Wait until the SIO has finished to send the character.  */
+		while (!(Ports[M6811_SCSR] & M6811_TDRE))
+		  continue;
+	
+		Ports[M6811_SCDR] = msg[i];
+		Ports[M6811_SCCR2] |= M6811_TE;
+	
+	  }
+          OS_EI();
 	}
 }
 
