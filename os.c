@@ -80,7 +80,7 @@ int PPPLen;
 int PPP[MAXPROCESS]; 
 int PPPMax[MAXPROCESS];
 
-fifo_t Fifos[MAXFIFO]; /* FIFOs */
+fifo_t Fifos[MAXFIFO];    /* FIFOs */
 
 time_t Clock;             /* Approximate time since system start in ms. */ 
 unsigned int TimeQuantum; /* Ticks per ms */ 
@@ -91,12 +91,14 @@ int main(int argc, char **argv) {
 	OS_DI(); 
 	OS_Init();
 
-	int PPPLen   = 2;
-	int PPP[]    = {-1,10}; 
-	int PPPMax[] = {10,3}; 
+	PPPLen   = 2;
+	PPP[0]    = -1;
+	PPP[1]    = 10; 
+	PPPMax[0] = 10; 
+	PPPMax[1] = 3; 
 
-	OS_Create(TestProcess,0,DEVICE,10);
-	OS_Create(Idle,0,SPORADIC,13412);  
+	OS_Create(TestProcess,0,DEVICE,100);
+	OS_Create(TestProcess,0,SPORADIC,13412);  
 	OS_Create(Idle,0,PERIODIC,10);  
 	
 	OS_Start(); 
@@ -149,10 +151,7 @@ void OS_Init(void) {
 	TimeQuantum = (M6811_CPU_HZ/16)/1000;
 
 	/* Enable TOI */ 
-	Ports[M6811_TMSK2] SET_BIT(M6811_BIT7);
-	
-	/* Unmask OC4 interrupt */
-	Ports[M6811_TMSK1] SET_BIT(M6811_BIT4);
+	/*Ports[M6811_TMSK2] SET_BIT(M6811_BIT7);	*/
 }
  
 /* Actually start the OS */
@@ -260,10 +259,17 @@ void SetPreemptionTimerInterval(unsigned int miliseconds) {
 	unsigned int *timer_address; 
 	
 	/* Make sure these are read as 16 bit numbers. */ 
-	TOC4_address  = (unsigned int *)&Ports[M6811_TCNT_HIGH];
-	timer_address = (unsigned int *)&Ports[M6811_TOC4_HIGH];
+	TOC4_address  = &(Ports[M6811_TOC4_HIGH]);
+	timer_address = &(Ports[M6811_TCNT_HIGH]);
 	
-	*TOC4_address = (*timer_address + (unsigned int)(miliseconds * TimeQuantum)) % 0xFFFF; 
+	*TOC4_address = (*timer_address + (miliseconds * TimeQuantum)); 
+
+
+	Ports[M6811_TCTL1] SET_BIT(M6811_BIT2);
+	
+	Ports[M6811_TFLG1] SET_BIT(M6811_BIT4);
+	/* Unmask OC4 interrupt */
+	Ports[M6811_TMSK1] SET_BIT(M6811_BIT4);
 }
 
 PID OS_Create(void (*f)(void), int arg, unsigned int level, unsigned int n) {	
@@ -342,6 +348,7 @@ void ContextSwitchToKernel(void)  {
 	/* Interrupt to a SwitchToProcess() or ReturnToKernel() ISRs. */ 
 	asm volatile (" swi "); 
 	/* This function returns when rti is called. */
+	OS_EI();
 }
 /* Called directly to transfer control to PCurrent, saving current context. */ 
 void ContextSwitchToProcess(void) { 
@@ -367,13 +374,13 @@ void ClockUpdateHandler (void) {
 void ClockUpdate(void) {
 	unsigned int elapsed_time; 
 	unsigned int timer_value; 
-	unsigned int *timer_address; 
+	volatile unsigned int *timer_address; 
 	static unsigned int residual = 0; 
 	static unsigned int last_timer_value = 0;
 	
 	/* Read the timer from the tick register as a single 16 bit number. */ 
-	timer_address = (unsigned int *)&Ports[M6811_TCNT_HIGH];
-	timer_value = *timer_address; 
+	timer_address = &Ports[M6811_TCNT_HIGH];
+	timer_value = *timer_address;
 
 	/* Check for TOF flag indicating an overflow condition. */ 
 	if (Ports[M6811_TFLG2] & M6811_BIT7) {
@@ -499,7 +506,7 @@ void SwitchToProcess(void) {
 	/* Correct for function call. */
 	PKernel.SP++; 
 	/* Set interrupt handlers. */ 
-	IV.OC4 = ContextSwitchToKernel; /* If OC4 is triggered, save state and SWI */ 
+	IV.OC4 = ReturnToKernel; /* If OC4 is triggered, save state and SWI */ 
 	IV.SWI = ReturnToKernel;
 	
 	/* If the process has already been running, we can return to its last context. */ 
@@ -507,7 +514,6 @@ void SwitchToProcess(void) {
 		/* Load Process Stack Pointer */ 
 		asm volatile (" lds %0 " : : "m" (PCurrent->SP) : "memory"); 
 		/* Return control to running process. */ 
-		OS_EI();
 		asm volatile (" rti "); 
 	} 
 	/* If the process has not been started, we need to start it for the first time. */ 
@@ -526,20 +532,14 @@ void SwitchToProcess(void) {
 }
 
 void TestProcess (void) {
-	unsigned int i; 
-	
-	for(i = 1; i != 0; i++);
-    for(i = 1; i != 0; i++);
-    for(i = 1; i != 0; i++);
-    for(i = 1; i != 0; i++);
-	
-	OS_Yield(); 
-	
-	for(i = 1; i != 0; i++);
-    for(i = 1; i != 0; i++);
-    for(i = 1; i != 0; i++);
-    for(i = 1; i != 0; i++);
-	
-	OS_Yield(); 
+	unsigned char i;  
+
+	while (1) {	
+		for(i = 1; i != 0; i++); 
+
+
+		
+		OS_Yield(); 
+	}
 }
 
