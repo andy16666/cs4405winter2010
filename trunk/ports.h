@@ -1,5 +1,16 @@
+/* Macros */
 #define SET_BIT(x)  |= x
 #define CLR_BIT(x)  &= ~x
+
+/* Bit Masks */
+#define M6811_BIT7	0x80
+#define M6811_BIT6	0x40	
+#define M6811_BIT5	0x20	
+#define M6811_BIT4	0x10
+#define M6811_BIT3	0x08
+#define M6811_BIT2	0x04	
+#define M6811_BIT1	0x02
+#define M6811_BIT0	0x01
 
 /* Part 1:  68HC11 Definitions. */
 #define M6811_PORTA	0x00
@@ -56,6 +67,7 @@ TOF: Overflow has occurred.
 #define M6811_OPTION	0x39    /* ADPU:CSEL:IRQE;DLY:CME:0:CR1:CR0 */ 
 
 
+/* Part 1:  68HC11 Definitions. */
 
 #define M6811_BAUD	0x2B	/* SCI Baud register */
 #define M6811_SCCR1	0x2C	/* SCI Control register 1 */
@@ -65,6 +77,18 @@ TOF: Overflow has occurred.
 
 #define M6811_HPRIO	0x3C    /* RBOOT:SMOD:MDA:IRV:PSEL3:PSEL2:PSEL1:PSEL0 */ 
 
+/* Flags of the BAUD register.  */
+#define M6811_SCP1	0x20	/* SCI Baud rate prescaler select */
+#define M6811_SCP0	0x10
+#define M6811_SCR2	0x04	/* SCI Baud rate select */
+#define M6811_SCR1	0x02
+#define M6811_SCR0	0x01
+
+#define M6811_BAUD_DIV_1	(0)
+#define M6811_BAUD_DIV_3	(M6811_SCP0)
+#define M6811_BAUD_DIV_4	(M6811_SCP1)
+#define M6811_BAUD_DIV_13	(M6811_SCP1|M6811_SCP0)
+
 /* Flags of the SCCR2 register.  */
 #define M6811_TE	0x08	/* Transmit Enable */
 #define M6811_RE	0x04	/* Receive Enable */
@@ -72,15 +96,8 @@ TOF: Overflow has occurred.
 /* Flags of the SCSR register.  */
 #define M6811_TDRE	0x80	/* Transmit Data Register Empty */
 
-/* Bit Masks */
-#define M6811_BIT7	0x80
-#define M6811_BIT6	0x40	
-#define M6811_BIT5	0x20	
-#define M6811_BIT4	0x10
-#define M6811_BIT3	0x08
-#define M6811_BIT2	0x04	
-#define M6811_BIT1	0x02
-#define M6811_BIT0	0x01
+#define M6811_DEF_BAUD M6811_BAUD_DIV_4 /* 1200 baud */
+
 
 /* Address is defined in the `memory.x' file.  */
 volatile unsigned char __attribute__((section("ports"))) Ports[];
