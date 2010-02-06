@@ -41,7 +41,7 @@
 
 
 
-#define M6811_TCTL1	0x20
+#define M6811_TCTL1	0x20    /* OM2:OL2:OM3:OL3:OM4:OL4:OM5:OL5 */
 #define M6811_TCTL2	0x21    /* 0:0:EDG1B:EDG1A:EDG2B:EDG2A:EDG3B:EDG3A */
 #define M6811_TMSK1	0x22    /* OC1I:OC2I:OC3I:OC4I:OC5I:IC1I:IC2I:IC3I */
 #define M6811_TFLG1	0x23    /* OC1F:OC2F:OC3F:OC4F:OC5F:IC1F:IC2F:IC3F */ 
@@ -83,5 +83,5 @@ TOF: Overflow has occurred.
 #define M6811_BIT0	0x01
 
 /* Address is defined in the `memory.x' file.  */
-volatile unsigned short __attribute__((section("ports"))) Ports[];
+volatile unsigned char __attribute__((section("ports"))) Ports[];
 
