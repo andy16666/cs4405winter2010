@@ -1,8 +1,5 @@
 #include "interrupts.h"
 
-void UnhandledInterrupt (void) { }  
-
-
 /* The interrupt vector. */ 
 volatile struct interrupt_vectors __attribute__((section("vectors"))) IV = {
    unused0:                UnhandledInterrupt,
@@ -36,6 +33,6 @@ volatile struct interrupt_vectors __attribute__((section("vectors"))) IV = {
    cop_fail_handler:       UnhandledInterrupt, /* unused */
    cop_clock_handler:      UnhandledInterrupt, /* unused */
    RTII:                   UnhandledInterrupt, /*  */
-   Reset:                  UnhandledInterrupt  /* reset vector - go to premain */
+   Reset:                  Reset  /* reset vector - go to premain */
 };
 
