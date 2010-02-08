@@ -11,11 +11,11 @@
  */
 #include "os.h"
 #include "fifo.h" 
+#include "ports.h"
 #include "semaphore.h"
 #include "interrupts.h"
-#include "semaphore.c"
 #include "interrupts.c"
-#include "ports.h"
+
 
 
 #define M6811_CPU_HZ 40000000 
@@ -72,6 +72,8 @@ void PrintInit (void);
 
 fifo_t Fifos[MAXFIFO]; /* FIFOs */
 
+int Semaphores[MAXSEM];
+
 /* Access all ports through this array */ 
 //volatile unsigned short Ports[];
 //volatile struct interrupt_vectors IV; 
@@ -91,12 +93,13 @@ int PPPMax[MAXPROCESS];
 time_t Clock;             /* Approximate time since system start in ms. */ 
 unsigned int TimeQuantum; /* Ticks per ms */ 
 
+void Reset (void) { main(); }
 
-int main(int argc, char **argv) {
+int main() {
 	char *msg1 = "One: This is a test\n";
 	char *msg2 = "Two: Buckle my shoe\n";
 	char *msg3 = "Periodic\n";
-	char *msg4 = "Sproatic\n";
+	char *msg4 = "Sproadic\n";
 
 	OS_DI(); 
 	OS_Init();
@@ -112,13 +115,14 @@ int main(int argc, char **argv) {
 	OS_InitSem(1,1);
 
 	PrintInit(); 
-	OS_Create(PrintString,(int)msg1,PERIODIC,10);
+	//OS_Create(PrintString,(int)msg1,PERIODIC,10);
 	OS_Create(PrintString,(int)msg2,PERIODIC,15);  
 	OS_Create(PrintString,(int)msg3,SPORADIC,14);  
 	OS_Create(PrintString,(int)msg4,SPORADIC,15);    
 	OS_DI(); 
 
 	OS_Start();
+	return 0; 
 }
  
 /* Initialize the OS */
@@ -132,9 +136,6 @@ void OS_Init(void) {
 
 	PKernel.SP = 0; 
 	
-	/* TODO: Set up kernel process. */ 
-	/* TODO: Set Kernel Interrupt Vector: PKernel.IV = */
-	
 	/* Initialize processes */ 
 	for (i = 0; i < MAXPROCESS; i++) {
 		P[i].pid = INVALIDPID; 
@@ -142,12 +143,11 @@ void OS_Init(void) {
 		P[i].QueueNext = 0;
 		/* Initial stack pointer points at the end of the stack. */ 
 		P[i].ISP = &(P[i].Stack[WORKSPACE-1]); 
-		/* TODO: Set IdleProcess.IV  =  */ 
 	}	
 	/* Initialize fifos. */ 
-	/*for (i = 0; i < MAXFIFO; i++) {
+	for (i = 0; i < MAXFIFO; i++) {
 		Fifos[i].fid = INVALIDFIFO; 
-	}*/	
+	}
 	
 	/* Set up the idle process. */ 
 	IdleProcess.pid  = INVALIDPID; 
@@ -263,29 +263,6 @@ void OS_Abort() {
 	asm(" stop "); 
 }
 
-/* Set OC4 to interrupt at a specific absolute time in the future. */ 
-void SetPreemptionTime(time_t time) {
-	SetPreemptionTimerInterval((unsigned int)(time - Clock)); 
-}
-
-/* Set OC4 to interrupt in a number of miliseconds. */ 
-void SetPreemptionTimerInterval(unsigned int miliseconds) {
-	unsigned int *TOC4_address; 
-	unsigned int *timer_address; 
-	
-	/* Make sure these are read as 16 bit numbers. */ 
-	TOC4_address  = (unsigned int*)&(Ports[M6811_TOC4_HIGH]);
-	timer_address = (unsigned int*)&(Ports[M6811_TCNT_HIGH]);
-	
-	*TOC4_address = (*timer_address + (miliseconds * TimeQuantum)); 
-
-
-	Ports[M6811_TCTL1] SET_BIT(M6811_BIT2);
-	
-	Ports[M6811_TFLG1] SET_BIT(M6811_BIT4);
-	/* Unmask OC4 interrupt */
-	Ports[M6811_TMSK1] SET_BIT(M6811_BIT4);
-}
 
 PID OS_Create(void (*f)(void), int arg, unsigned int level, unsigned int n) {	
 	process *p; 
@@ -312,15 +289,18 @@ PID OS_Create(void (*f)(void), int arg, unsigned int level, unsigned int n) {
 	p->Arg        = arg;
 	p->running    = FALSE; 	
 
+	p->QueueNext  = 0;
+	p->QueuePrev  = 0;  
+
 	p->DevNextRunTime = 0; 
 
 	/* Set the initial program counter to the address of the function representing the process. */ 
 	p->program_location = f;
 
 	/* Add Sporatic Processes to the Sporatic Queue */ 
-	if      (p->Level == SPORADIC) { SpoP = QueueAdd(p, SpoP); }
+	if (p->Level == SPORADIC) { SpoP = QueueAdd(p, SpoP); }
 	/* Add Device Processes to the Device Queue */ 
-	else if (p->Level == DEVICE)   { DevP = QueueAdd(p, DevP); }
+	if (p->Level == DEVICE)   { DevP = QueueAdd(p, DevP); }
 	
 	OS_EI(); 
 	return p->pid; 
@@ -331,11 +311,9 @@ void OS_Terminate() {
 	PCurrent->pid = INVALIDPID;
 
 	/* Remove the process from the SPORATIC queue */
-	if      (PCurrent->Level == SPORADIC) { SpoP = QueueRemove(PCurrent, SpoP); } 
+	if (PCurrent->Level == SPORADIC) { SpoP = QueueRemove(PCurrent, SpoP); } 
 	/* Remove the process from the DEVICE queue */
-	else if (PCurrent->Level == DEVICE)   { DevP = QueueRemove(PCurrent, DevP); }
-	/* TODO: Release Semiphores  */
-	
+	if (PCurrent->Level == DEVICE)   { DevP = QueueRemove(PCurrent, DevP); }
 	/* Return to the kernel without saving the context. */ 
 	ReturnToKernel(); 
 } 
@@ -389,6 +367,34 @@ void OS_Write(FIFO f, int val) {
 	OS_EI();
 }
 
+
+
+void OS_InitSem(int s, int n) {
+	OS_DI();
+	/* Set the semaphore to the number of this resource that are available. */ 
+	Semaphores[s] = n; 
+	OS_EI(); 
+}
+
+void OS_Wait(int s) {
+	OS_DI();
+	/* While resource is not available, release the CPU */ 
+	while (Semaphores[s] <= 0) { 
+		OS_Yield(); 
+	}
+	/* Allocate an instance of the recourse. */ 
+	Semaphores[s]--; 
+	OS_EI(); 
+}
+
+void OS_Signal(int s) {
+	OS_DI();
+	/* Release resource. */ 
+	Semaphores[s]++; 
+	OS_EI();
+}
+
+
 BOOL OS_Read(FIFO f, int *val) {
 	fifo_t *fifo = &Fifos[f];
 	
@@ -406,6 +412,31 @@ BOOL OS_Read(FIFO f, int *val) {
 	OS_EI();
 	return TRUE;
 }
+
+/* Set OC4 to interrupt at a specific absolute time in the future. */ 
+void SetPreemptionTime(time_t time) {
+	SetPreemptionTimerInterval((unsigned int)(time - Clock)); 
+}
+
+/* Set OC4 to interrupt in a number of miliseconds. */ 
+void SetPreemptionTimerInterval(unsigned int miliseconds) {
+	unsigned int *TOC4_address; 
+	unsigned int *timer_address; 
+	
+	/* Make sure these are read as 16 bit numbers. */ 
+	TOC4_address  = (unsigned int*)&(Ports[M6811_TOC4_HIGH]);
+	timer_address = (unsigned int*)&(Ports[M6811_TCNT_HIGH]);
+	
+	*TOC4_address = (*timer_address + (miliseconds * TimeQuantum)); 
+
+
+	Ports[M6811_TCTL1] SET_BIT(M6811_BIT2);
+	
+	Ports[M6811_TFLG1] SET_BIT(M6811_BIT4);
+	/* Unmask OC4 interrupt */
+	Ports[M6811_TMSK1] SET_BIT(M6811_BIT4);
+}
+
 
 /* Performs a context switch, saving the given current stack pointer. 
 	Used ONLY by:
@@ -429,6 +460,8 @@ void ContextSwitchToProcess(void) {
 	asm volatile (" swi "); 
 	/* This function returns when rti is called. */
 }
+
+void UnhandledInterrupt (void) { return; }  
 
 
 /* Interrupt service routine for updating the clock. */ 
@@ -644,12 +677,15 @@ void PrintString (void) {
 
 	OS_Wait(1); 
 	OS_Create(PrintChar,(int)f,DEVICE,1);
+
 	while (*msgp) {
 		OS_Write(f,(int)(*msgp++)); 
 		OS_Yield(); 
 	}
+
 	OS_Write(f,0); 
 	OS_Signal(1); 
+	OS_Terminate(); 
 }
 
 void PrintChar (void) {
