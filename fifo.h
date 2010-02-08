@@ -13,13 +13,15 @@
 
 #include "os.h"
 
-typedef struct fifo
-{
+typedef struct fifo {
 	FIFO fid;			/* The ID of the FIFO. */
 	int elems[FIFOSIZE];
 	int nElems;			/* Number of elements currently used in this FIFO */
-	int lastRead;		/* The index of the last element read */
-	int lastWrite;		/* The index of the last element written */
+	int read;		/* The index of the last element read */
+	int write;		/* The index of the last element written */
 } fifo_t;
+
+void incrementFifoRead (fifo_t *f); 
+void incrementFifoWrite(fifo_t *f); 
 
 #endif /* __FIFO_H__ */

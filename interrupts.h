@@ -1,15 +1,18 @@
 #ifndef INTERRUPTS_H
 #define INTERRUPTS_H
+
+
 /*
  *  interrupts.h
  */
 
-void UnhandledInterrupt(void) __attribute__((interrupt)); 
+//extern volatile struct interrupt_vectors __attribute__((section("vectors"))) IV; 
+
+void UnhandledInterrupt (void) __attribute__((interrupt));  
+void Reset (void) __attribute__((interrupt)); 
 
 /*Interrrupt typedefs*/
 typedef void (* interrupt_t) (void);
-
- 
 
 /*
 Structure that holds the function pointers
@@ -44,14 +47,14 @@ struct interrupt_vectors
    interrupt_t OC2;
    interrupt_t OC1;
  
-   interrupt_t capture3_handler; /* Timer Input Compare Vectors */
-   interrupt_t capture2_handler;
-   interrupt_t capture1_handler;
+   interrupt_t IC3; /* Timer Input Compare Vectors */
+   interrupt_t IC2;
+   interrupt_t IC1;
  
-   interrupt_t rtii_handler; /* Real-Time-Interrupt Generator Vector */
+   interrupt_t RTII; /* Real-Time-Interrupt Generator Vector */
  
-   interrupt_t irq_handler;
-   interrupt_t xirq_handler;
+   interrupt_t IRQ;
+   interrupt_t XIRQ;
  
    interrupt_t SWI; /* Trap Vector */
  
@@ -63,6 +66,6 @@ struct interrupt_vectors
    interrupt_t Reset; /* Reset Vector */
 };
 
-typedef struct interrupt_vectors interrupt_vectors_t;
+
 
 #endif
