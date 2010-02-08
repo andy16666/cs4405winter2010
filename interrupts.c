@@ -1,5 +1,8 @@
 #include "interrupts.h"
 
+void UnhandledInterrupt (void) { }  
+
+
 /* The interrupt vector. */ 
 volatile struct interrupt_vectors __attribute__((section("vectors"))) IV = {
    unused0:                UnhandledInterrupt,
@@ -23,19 +26,16 @@ volatile struct interrupt_vectors __attribute__((section("vectors"))) IV = {
    OC3:                    UnhandledInterrupt, /* out compare 3 - unused */
    OC2:                    UnhandledInterrupt, /* out compare 2 - unused */
    OC1:                    UnhandledInterrupt, /* out compare 1 - unused */
-   capture3_handler:       UnhandledInterrupt, /* in capt 3 -left shaft encoder -calib & turning*/
-   capture2_handler:       UnhandledInterrupt, /* in capt 2 - unused */
-   capture1_handler:       UnhandledInterrupt, /* in capt 1 - unused */
-   irq_handler:            UnhandledInterrupt, /* IRQ - unused */
-   xirq_handler:           UnhandledInterrupt, /* XIRQ - unused */
+   IC3:                    UnhandledInterrupt, /* in capt 3 -left shaft encoder -calib & turning*/
+   IC2:                    UnhandledInterrupt, /* in capt 2 - unused */
+   IC1:                    UnhandledInterrupt, /* in capt 1 - unused */
+   IRQ:                    UnhandledInterrupt, /* IRQ - unused */
+   XIRQ:                   UnhandledInterrupt, /* XIRQ - unused */
    SWI:                    UnhandledInterrupt, /* SWI: Trap function used for voluntary context switching. */ 
    illegal_handler:        UnhandledInterrupt, /* illegal -unused */
    cop_fail_handler:       UnhandledInterrupt, /* unused */
    cop_clock_handler:      UnhandledInterrupt, /* unused */
-   rtii_handler:           UnhandledInterrupt, /*  */
+   RTII:                   UnhandledInterrupt, /*  */
    Reset:                  UnhandledInterrupt  /* reset vector - go to premain */
 };
 
-void UnhandledInterrupt(void) {	
-	return; /* Do Nothing. */ 
-}

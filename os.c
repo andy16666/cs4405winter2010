@@ -6,13 +6,17 @@
  * Authors: 
  *	Joel Goguen <r1hh8@unb.ca>
  *	Andrew Somerville <z19ar@unb.ca>
+ *
+ * m68hc11-gcc -g -mshort -Wl,-m,m68hc11elfb  -msoft-reg-count=0 os.c -o os.elf
  */
- 
-
-#include "fifo.h"
+#include "os.h"
+#include "fifo.h" 
+#include "semaphore.h"
+#include "interrupts.h"
+#include "semaphore.c"
 #include "interrupts.c"
 #include "ports.h"
-#include "os.h"
+
 
 #define M6811_CPU_HZ 40000000 
 
@@ -62,13 +66,11 @@ void SetPreemptionTimerInterval(unsigned int miliseconds);
 
 /* Processes */ 
 void Idle (void); 
-void TestProcess (void);
 void PrintChar(void);
-void HelloWorld (void); 
-void Period (void); 
-void Third (void); 
+void PrintString(void);
 void PrintInit (void); 
-void Sporadic (void); 
+
+fifo_t Fifos[MAXFIFO]; /* FIFOs */
 
 /* Access all ports through this array */ 
 //volatile unsigned short Ports[];
@@ -86,37 +88,37 @@ int PPPLen;
 int PPP[MAXPROCESS]; 
 int PPPMax[MAXPROCESS];
 
-fifo_t Fifos[MAXFIFO];    /* FIFOs */
-
 time_t Clock;             /* Approximate time since system start in ms. */ 
 unsigned int TimeQuantum; /* Ticks per ms */ 
 
 
-int main(int argc, char **argv) {		
+int main(int argc, char **argv) {
+	char *msg1 = "One: This is a test\n";
+	char *msg2 = "Two: Buckle my shoe\n";
+	char *msg3 = "Periodic\n";
+	char *msg4 = "Sproatic\n";
+
 	OS_DI(); 
-		
 	OS_Init();
 
-	
-
-	PPPLen   = 3;
-	PPP[0]    = IDLE;
-	PPP[1]    = 10;
-	PPP[2]    = 15;  
+	PPPLen   = 2;
+	PPP[0]    = 10;
+	PPP[1]    = 15;  
 	PPPMax[0] = 10; 
 	PPPMax[1] = 10; 
-	PPPMax[2] = 10;
+
+	
+	OS_InitSem(0,1);
+	OS_InitSem(1,1);
 
 	PrintInit(); 
-	OS_Create(Third,0,DEVICE,30000);
-	OS_Create(HelloWorld,0,DEVICE,10000);  
-	OS_Create(Period,0,PERIODIC,15);  
-	OS_Create(Sporadic,0,SPORADIC,10);  
+	OS_Create(PrintString,(int)msg1,PERIODIC,10);
+	OS_Create(PrintString,(int)msg2,PERIODIC,15);  
+	OS_Create(PrintString,(int)msg3,SPORADIC,14);  
+	OS_Create(PrintString,(int)msg4,SPORADIC,15);    
 	OS_DI(); 
 
-	OS_Start(); 
-
-	return 0;
+	OS_Start();
 }
  
 /* Initialize the OS */
@@ -143,9 +145,9 @@ void OS_Init(void) {
 		/* TODO: Set IdleProcess.IV  =  */ 
 	}	
 	/* Initialize fifos. */ 
-	for (i = 0; i < MAXFIFO; i++) {
+	/*for (i = 0; i < MAXFIFO; i++) {
 		Fifos[i].fid = INVALIDFIFO; 
-	}	
+	}*/	
 	
 	/* Set up the idle process. */ 
 	IdleProcess.pid  = INVALIDPID; 
@@ -236,21 +238,21 @@ void OS_Start(void) {
 			}
 		}
 
+		/* If we yet know when we have to come back, assign a reasonable value. */ 
+		if (!t) { t = 100; /*ms*/ }	
+
 		/* We're here so we must be idle. Schedule a Sporatic Process. */ 
 		/* NOTE: Invalid periodic processes are treated as idle. */ 
 		if (SpoP) {
 			PCurrent = SpoP; 
-			if (t) {
-				SetPreemptionTime(t);
-			}	
+			SetPreemptionTime(t);	
 			ContextSwitchToProcess(); 
 			continue; 
-		}
-		
-		/* We're here so we must be idle and there must be no sporatic processes to run. */ 
-		if (t) {
-			SetPreemptionTime(t);
+		} 
+		else {
+			/* We're here so we must be idle and there must be no sporatic processes to run. */ 
 			PCurrent = &IdleProcess;
+			SetPreemptionTime(t);
 			ContextSwitchToProcess(); 			
 			continue; 
 		}
@@ -302,6 +304,7 @@ PID OS_Create(void (*f)(void), int arg, unsigned int level, unsigned int n) {
 		}
 	} 
 
+	/* If we run out of available process blocks, Abort. */ 
 	if (!can_create) { OS_Abort(); }
 
 	p->Name       = n; 
@@ -351,6 +354,57 @@ void OS_Yield() {
 
 int OS_GetParam() {
 	return PCurrent->Arg; 
+}
+
+FIFO OS_InitFiFo() {
+	int i;
+	FIFO id = INVALIDFIFO;
+	
+	for(i = 0; i < MAXFIFO; i++) {
+		if(INVALIDFIFO == Fifos[i].fid)	{
+			Fifos[i].fid       = id = i;
+			Fifos[i].write = 0;
+			Fifos[i].read  = 0;
+			Fifos[i].nElems    = 0;
+			break;
+		}
+	}
+	return id;
+}
+
+void OS_Write(FIFO f, int val) {	
+	fifo_t *fifo;
+	
+	fifo = &Fifos[f];
+
+	OS_DI();
+	fifo->elems[fifo->write] = val;
+	
+	/* Increment the write counter. */
+	incrementFifoWrite(fifo); 
+
+	if(fifo->nElems >= FIFOSIZE) { incrementFifoRead(fifo); }
+	else                         { fifo->nElems++; }
+
+	OS_EI();
+}
+
+BOOL OS_Read(FIFO f, int *val) {
+	fifo_t *fifo = &Fifos[f];
+	
+	/* If there is nothing in the FIFO, fail at reading */
+	if(0 == fifo->nElems) {
+
+		return FALSE;
+	}
+	
+	OS_DI();
+	*val = fifo->elems[fifo->read];
+	/* Circularly increment the read position */	
+	incrementFifoRead(fifo);	
+	fifo->nElems--;	
+	OS_EI();
+	return TRUE;
 }
 
 /* Performs a context switch, saving the given current stack pointer. 
@@ -424,9 +478,7 @@ void ClockUpdate(void) {
 	last_timer_value = timer_value; 
 }
 
-
 void Idle (void) { while (1); }
-
 
 process *GetPeriodicProcessByName(unsigned int n) {
 	int i; 
@@ -556,109 +608,70 @@ void SwitchToProcess(void) {
 }
 
 
-void TestProcess (void) {
-	unsigned char i;  
 
-	while (1) {	
-		for(i = 1; i != 0; i++); 
+void incrementFifoRead(fifo_t *f) {
+	f->read = (++(f->read) >= FIFOSIZE) ? 0 : f->read;
+}
 
-		OS_Create(HelloWorld,0,PERIODIC,15);  
+void incrementFifoWrite(fifo_t *f) {
+	f->write = (++(f->write) >= FIFOSIZE) ? 0 : f->write;
+}
+
+void PrintInit(void) {
+	static BOOL initialized = FALSE; 
+	if (!initialized) {
+		/* Configure the SCI to send at M6811_DEF_BAUD baud.  */
+		Ports[M6811_BAUD] = M6811_DEF_BAUD;
+
+		/* Setup character format 1 start, 8-bits, 1 stop.  */
+		Ports[M6811_SCCR1] = 0;
+
+		/* Enable receiver and transmitter.  */
+		Ports[M6811_SCCR2] = M6811_TE | M6811_RE;
 		
+		initialized = TRUE;
+	}
+}
+
+void PrintString (void) {
+	char *msg, *msgp;
+	FIFO f; 
+
+	msg = (char *)OS_GetParam(); 
+	msgp = msg; 
+
+	f = OS_InitFiFo(); 
+
+	OS_Wait(1); 
+	OS_Create(PrintChar,(int)f,DEVICE,1);
+	while (*msgp) {
+		OS_Write(f,(int)(*msgp++)); 
+		OS_Yield(); 
+	}
+	OS_Write(f,0); 
+	OS_Signal(1); 
+}
+
+void PrintChar (void) {
+	FIFO f; 
+	char c; 
+	int ic; 
+
+	f = (FIFO)OS_GetParam();
+
+	/* Listen for chars in the given FIFO and print them when they appear. */ 
+	while (1) {
+		while (OS_Read(f,&ic)) {
+			c = (char)ic;
+			if (!c) OS_Terminate(); 
+			OS_Wait(0); 	
+			while (!(Ports[M6811_SCSR] & M6811_TDRE))
+				continue;
+			Ports[M6811_SCDR] = c;
+			Ports[M6811_SCCR2] |= M6811_TE;
+			OS_Signal(0);
+		}
 		OS_Yield(); 
 	}
 }
 
-
-void PrintInit(void) {
-  /* Configure the SCI to send at M6811_DEF_BAUD baud.  */
-  Ports[M6811_BAUD] = M6811_DEF_BAUD;
-
-  /* Setup character format 1 start, 8-bits, 1 stop.  */
-  Ports[M6811_SCCR1] = 0;
-
-  /* Enable receiver and transmitter.  */
-  Ports[M6811_SCCR2] = M6811_TE | M6811_RE;
-}
-
-
-void HelloWorld (void) {
-  char *msg = "Hello world!\n";
-  char *msgp; 
-
-
-
-	while (1) {
-          msgp = msg; 
-	  while (*msgp != 0) {
-		/* Wait until the SIO has finished to send the character.  */
-		while (!(Ports[M6811_SCSR] & M6811_TDRE))
-		  continue;
-	
-		Ports[M6811_SCDR] = *msgp++;
-		Ports[M6811_SCCR2] |= M6811_TE;
-	  }
-	  OS_Yield(); 
-	}
-}
-
-void Third (void) {
-  char *msg = "1/3 as often!\n";
-  char *msgp; 
-
-	while (1) {
-          msgp = msg; 
-	  while (*msgp != 0) {
-		/* Wait until the SIO has finished to send the character.  */
-		while (!(Ports[M6811_SCSR] & M6811_TDRE))
-		  continue;
-	
-		Ports[M6811_SCDR] = *msgp++;
-		Ports[M6811_SCCR2] |= M6811_TE;
-	  }
-	  OS_Yield(); 
-	}
-}
-
-void Period (void) {
-  char *msg = "Periodic Process!!!"; 
-  int i = 0; 
-  unsigned int j = 0;
-  int len = 18;
-
-  while (1) {
-	for (i = 0; i < len; i++) {
-		for(j = 1; j != 0; j++);
-		OS_DI();
-		/* Wait until the SIO has finished to send the character.  */
-		while (!(Ports[M6811_SCSR] & M6811_TDRE))
-		  continue;
-	
-		Ports[M6811_SCDR] = msg[i];
-		Ports[M6811_SCCR2] |= M6811_TE;
-	        OS_EI();	
-	  }
-
-	}
-}
-
-void Sporadic (void) {
-  char *msg = "Sporadic!"; 
-  int i = 0; 
-  unsigned int j = 0;
-  int len = 9;
-
-  while (1) {
-	for (i = 0; i < len; i++) {
-		for(j = 1; j != 0; j++);
-		OS_DI();
-		/* Wait until the SIO has finished to send the character.  */
-		while (!(Ports[M6811_SCSR] & M6811_TDRE))
-		  continue;
-	
-		Ports[M6811_SCDR] = msg[i];
-		Ports[M6811_SCCR2] |= M6811_TE;
-	        OS_EI();	
-	  }
-
-	}
-}
