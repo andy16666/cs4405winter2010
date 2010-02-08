@@ -8,8 +8,9 @@
  *	Andrew Somerville <z19ar@unb.ca>
  */
 
-#include "fifo.h"
+
 #include "os.h"
+#include "semaphore.h"
 
 int Semaphores[MAXSEM];
 
@@ -23,7 +24,9 @@ void OS_InitSem(int s, int n) {
 void OS_Wait(int s) {
 	OS_DI();
 	/* While resource is not available, release the CPU */ 
-	while (Semaphores[s] <= 0) { OS_Yield(); }
+	while (Semaphores[s] <= 0) { 
+		OS_Yield(); 
+	}
 	/* Allocate an instance of the recourse. */ 
 	Semaphores[s]--; 
 	OS_EI(); 
