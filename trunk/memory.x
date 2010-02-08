@@ -5,16 +5,16 @@ MEMORY
   page0 (rw) : ORIGIN = 0x0, LENGTH = 0x0100
   ports (rw) : ORIGIN = 0x1000, LENGTH = 0x003F
   text (rx)  : ORIGIN = 0x8000, LENGTH = 0x6000
-  eeprom        : ORIGIN = 0xb600, LENGTH = 512  
-  vectors (rwx) : ORIGIN = 0xFFC0, LENGTH = 0x0040
+  eeprom        : ORIGIN = 0xb600, LENGTH = 0x0100  
   data          : ORIGIN = 0xB700, LENGTH = 0x5000
+  vectors (rwx) : ORIGIN = 0xFFC0, LENGTH = 0x0040
 }
 
  	
 
 SECTIONS
 {
-  ports : { *(ports) } > ports
+  ports   : { *(ports) } > ports
   vectors : { *(vectors) } > vectors
 }
 
