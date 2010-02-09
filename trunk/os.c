@@ -18,7 +18,7 @@
 
 
 
-#define M6811_CPU_HZ 4000000
+#define M6811_CPU_KHZ 400000
 /* Maximum time any non-device process can execute in ms. */ 
 #define MAX_EXECUTION_TIME 100
 
@@ -68,9 +68,11 @@ void SetPreemptionTimerInterval(unsigned int miliseconds);
 
 /* Processes */ 
 void Idle (void); 
-void PrintChar(void);
+void PrintChar(void);	
 void PrintString(void);
 void PrintInit (void); 
+void PrintTime (void); 
+void PrintSystemTime (void);
 
 fifo_t Fifos[MAXFIFO]; /* FIFOs */
 
@@ -92,41 +94,35 @@ int PPPLen;
 int PPP[MAXPROCESS]; 
 int PPPMax[MAXPROCESS];
 
-time_t Clock;             /* Approximate time since system start in ms. */ 
-unsigned int TimeQuantum; /* Ticks per ms */ 
+time_t Clock;       /* Approximate time since system start in ms. */ 
+time_t TimeQuantum; /* Ticks per ms */ 
 
 void Reset (void) { 
+	unsigned int i; 
+	/* Set the timer prescale factor to 16 (1,1)...Must be set very soon after startup!!! */
+	Ports[M6811_TMSK2] SET_BIT(M6811_BIT0);
+	Ports[M6811_TMSK2] SET_BIT(M6811_BIT1);
+
+	/* Wait a few thousand cycles for the cpu timing to settle. */   
+	for (i = 1; i !=0; i++); 
+
+	
+	main(); 
+}
+
+int main() {
 	unsigned int i; 
 
 	/* Set the timer prescale factor to 16 (1,1)...Must be set very soon after startup!!! */
 	Ports[M6811_TMSK2] SET_BIT(M6811_BIT0);
 	Ports[M6811_TMSK2] SET_BIT(M6811_BIT1);
 
+	/* Wait a few thousand cycles for the cpu timing to settle. */   
+	for (i = 1; i !=0; i++); 
+
 	/* Mask any interrupts during booting. */ 
 	OS_DI(); 
-
-	/* Wait a least 5000 cycles for the cpu timing to settle. */   
-	for (i = 0; i < 5000; i++); 
-
-	/* TODO: Make sure this calculation is correct. */ 
-	TimeQuantum = (M6811_CPU_HZ/16)/1000;
-
-	/* Update the clock, clearing any overflows. */ 
-	ClockUpdate(); 
-
-	/* When the hardware pulse accumulator overflows, update the clock, clearing the overflow. */ 
-	IV.TOI = ClockUpdateHandler;
-	/* Enable TOI */ 
-	Ports[M6811_TMSK2] SET_BIT(M6811_BIT7);	
-
-	main(); 
-}
-
-int main() {
-	char *msg1 = "One: This is a test\n";
-	char *msg2 = "Two: Buckle my shoe\n";
-	char *msg3 = "Periodic\n";
-	char *msg4 = "Sproadic\n";
+	
 
 	OS_Init();
 
@@ -141,10 +137,8 @@ int main() {
 	OS_InitSem(1,1);
 
 	PrintInit(); 
-	OS_Create(PrintString,(int)msg1,PERIODIC,10);
-	OS_Create(PrintString,(int)msg2,PERIODIC,15);  
-	OS_Create(PrintString,(int)msg3,SPORADIC,14);  
-	OS_Create(PrintString,(int)msg4,SPORADIC,15);    
+	OS_Create(PrintSystemTime,0,DEVICE,500);
+	OS_Create(PrintTime,0,DEVICE,10);
 	OS_DI(); 
 
 	OS_Start();
@@ -155,7 +149,18 @@ int main() {
 void OS_Init(void) {	
 	int i; 
 
-	Clock    = 0;
+	TimeQuantum = (M6811_CPU_KHZ/16);
+	
+	/* Initialize the clock */ 
+	Clock    = 0;	
+	ClockUpdate(); 
+
+	/* Enable TOI */ 
+	//IV.TOI = ClockUpdateHandler;
+	/* When the hardware pulse accumulator overflows, update the clock. (Causes intermittent crashes.) */ 
+	//Ports[M6811_TMSK2] SET_BIT(M6811_BIT7);	
+
+
 	DevP     = 0;
 	SpoP     = 0; 
 	PCurrent = 0; 
@@ -181,8 +186,6 @@ void OS_Init(void) {
 	IdleProcess.ISP  = &(IdleProcess.Stack[WORKSPACE-1]);
 	IdleProcess.program_location = &Idle; 
 	IdleProcess.running = FALSE;
-
-	
 }
  
 /* Actually start the OS */
@@ -191,9 +194,9 @@ void OS_Start(void) {
 	time_t t;         /* Time to interrupt. */ 
 	int ppp_next;     /* Queue index of the next periodic process. */ 
 
-	ppp_next = 0; 
-
 	IV.SWI = SwitchToProcess; 
+
+	ppp_next = 0; 
 
 	/* Scheduler. */ 
 	while (1) {
@@ -216,8 +219,13 @@ void OS_Start(void) {
 			
 			/* If a device process is ready, run it. */ 
 			if (PCurrent) {	
+				if (PCurrent->DevNextRunTime) {
+					PCurrent->DevNextRunTime += (time_t)(PCurrent->Name);
+				}
+				else {
+					PCurrent->DevNextRunTime = Clock + (time_t)(PCurrent->Name);
+				}
 				ContextSwitchToProcess(); 
-				PCurrent->DevNextRunTime += (time_t)(PCurrent->Name);
 				continue; 
 			}			
 			/* Find the time of the next device process, t. */ 
@@ -350,7 +358,7 @@ FIFO OS_InitFiFo() {
 	
 	for(i = 0; i < MAXFIFO; i++) {
 		if(INVALIDFIFO == Fifos[i].fid)	{
-			Fifos[i].fid       = id = i;
+			Fifos[i].fid       = id = i + 1;
 			Fifos[i].write = 0;
 			Fifos[i].read  = 0;
 			Fifos[i].nElems    = 0;
@@ -608,7 +616,7 @@ void ReturnToKernel(void)  {
 	/* Mask OC4 interrupts */
 	Ports[M6811_TMSK1] CLR_BIT(M6811_BIT4);
 	/* Reset interrupt handlers. */ 
-	IV.OC4 = 0; /* The kernel cannot be preempted. */ 
+	IV.OC4 = UnhandledInterrupt; /* The kernel cannot be preempted. */ 
 	IV.SWI = SwitchToProcess; 
 
 	/* Load Kernel Stack Pointer */
@@ -686,13 +694,11 @@ void PrintString (void) {
 	f = OS_InitFiFo(); 
 
 	OS_Wait(1); 
-	OS_Create(PrintChar,(int)f,DEVICE,2);
-
+	OS_Create(PrintChar,(int)f,DEVICE,1);
 	while (*msgp) {
 		OS_Write(f,(int)(*msgp++)); 
 		OS_Yield(); 
 	}
-
 	OS_Write(f,0); 
 	OS_Signal(1); 
 	OS_Terminate(); 
@@ -720,4 +726,85 @@ void PrintChar (void) {
 		OS_Yield(); 
 	}
 }
+
+void PrintTime (void) { 
+	time_t time = 0; 
+	char *time_p; 
+	char *time_s = "00:00.00\r"; 
+
+	int cs; 
+	int s; 
+	int m; 
+	
+	
+	/* Listen for chars in the given FIFO and print them when they appear. */ 
+	while (1) {
+		cs = time % 100; 
+		s = (time/100) % 60; 
+		m = (time/100) / 60; 
+
+		time_s[7] = cs % 10 + '0';  
+		time_s[6] = cs / 10 + '0';  
+		time_s[4] = s % 10 + '0';  
+		time_s[3] = s / 10 + '0';  
+		time_s[1] = m % 10 + '0';  
+		time_s[0] = m / 10 + '0';  
+
+
+
+		OS_Wait(0); 	
+		time_p = time_s; 
+		while (*time_p) {
+			while (!(Ports[M6811_SCSR] & M6811_TDRE))
+				continue;
+			Ports[M6811_SCDR] = *time_p++;
+			Ports[M6811_SCCR2] |= M6811_TE;
+		}
+		OS_Signal(0);
+
+		OS_Yield(); 			
+		time++; 
+	}
+}
+
+/* Specific to this implementation. */ 
+void PrintSystemTime (void) { 
+	unsigned long time = 0; 
+	char *time_p; 
+	char *time_s = "        S00:00\r"; 
+
+	int s; 
+	int m; 
+	
+	/* Listen for chars in the given FIFO and print them when they appear. */ 
+	while (1) {
+		OS_DI(); 	
+		time = Clock/1000; 
+		OS_EI(); 
+
+		s = time % 60; 
+		m = time / 60; 
+
+		time_s[4+9] = s % 10 + '0';  
+		time_s[3+9] = s / 10 + '0';  
+		time_s[1+9] = m % 10 + '0';  
+		time_s[0+9] = m / 10 + '0';  
+
+
+
+		OS_Wait(0); 	
+		time_p = time_s; 
+		while (*time_p) {
+			while (!(Ports[M6811_SCSR] & M6811_TDRE))
+				continue;
+			Ports[M6811_SCDR] = *time_p++;
+			Ports[M6811_SCCR2] |= M6811_TE;
+		}
+		OS_Signal(0);
+
+		OS_Yield(); 
+	}
+}
+
+
 
