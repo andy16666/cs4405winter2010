@@ -18,7 +18,9 @@
 
 
 
-#define M6811_CPU_HZ 40000000 
+#define M6811_CPU_HZ 4000000
+/* Maximum time any non-device process can execute in ms. */ 
+#define MAX_EXECUTION_TIME 100
 
 typedef volatile unsigned long time_t; 
 
@@ -93,7 +95,32 @@ int PPPMax[MAXPROCESS];
 time_t Clock;             /* Approximate time since system start in ms. */ 
 unsigned int TimeQuantum; /* Ticks per ms */ 
 
-void Reset (void) { main(); }
+void Reset (void) { 
+	unsigned int i; 
+
+	/* Set the timer prescale factor to 16 (1,1)...Must be set very soon after startup!!! */
+	Ports[M6811_TMSK2] SET_BIT(M6811_BIT0);
+	Ports[M6811_TMSK2] SET_BIT(M6811_BIT1);
+
+	/* Mask any interrupts during booting. */ 
+	OS_DI(); 
+
+	/* Wait a least 5000 cycles for the cpu timing to settle. */   
+	for (i = 0; i < 5000; i++); 
+
+	/* TODO: Make sure this calculation is correct. */ 
+	TimeQuantum = (M6811_CPU_HZ/16)/1000;
+
+	/* Update the clock, clearing any overflows. */ 
+	ClockUpdate(); 
+
+	/* When the hardware pulse accumulator overflows, update the clock, clearing the overflow. */ 
+	IV.TOI = ClockUpdateHandler;
+	/* Enable TOI */ 
+	Ports[M6811_TMSK2] SET_BIT(M6811_BIT7);	
+
+	main(); 
+}
 
 int main() {
 	char *msg1 = "One: This is a test\n";
@@ -101,21 +128,20 @@ int main() {
 	char *msg3 = "Periodic\n";
 	char *msg4 = "Sproadic\n";
 
-	OS_DI(); 
 	OS_Init();
 
 	PPPLen   = 2;
 	PPP[0]    = 10;
-	PPP[1]    = 15;  
-	PPPMax[0] = 10; 
-	PPPMax[1] = 10; 
+	PPP[1]    = 15; 
+	PPPMax[0] = 2; 
+	PPPMax[1] = 2; 
 
 	
 	OS_InitSem(0,1);
 	OS_InitSem(1,1);
 
 	PrintInit(); 
-	//OS_Create(PrintString,(int)msg1,PERIODIC,10);
+	OS_Create(PrintString,(int)msg1,PERIODIC,10);
 	OS_Create(PrintString,(int)msg2,PERIODIC,15);  
 	OS_Create(PrintString,(int)msg3,SPORADIC,14);  
 	OS_Create(PrintString,(int)msg4,SPORADIC,15);    
@@ -156,17 +182,7 @@ void OS_Init(void) {
 	IdleProcess.program_location = &Idle; 
 	IdleProcess.running = FALSE;
 
-	/* When the hardware pulse accumulator overflows, update the clock, clearing the overflow. */ 
-	IV.TOI = ClockUpdateHandler;
-
-	/* Set the timer prescale factor to 16 (1,1)...Must be set very soon after startup!!! */
-	Ports[M6811_TMSK2] SET_BIT(M6811_BIT0);
-	Ports[M6811_TMSK2] SET_BIT(M6811_BIT1);
-	/* TODO: Make sure this calculation is correct. */ 
-	TimeQuantum = (M6811_CPU_HZ/16)/1000;
-
-	/* Enable TOI */ 
-	/*Ports[M6811_TMSK2] SET_BIT(M6811_BIT7);	*/
+	
 }
  
 /* Actually start the OS */
@@ -238,24 +254,18 @@ void OS_Start(void) {
 			}
 		}
 
-		/* If we yet know when we have to come back, assign a reasonable value. */ 
-		if (!t) { t = 100; /*ms*/ }	
+		/* If we yet know when we have to come back, use MAX_EXECUTION_TIME. */ 
+		if (!t) { t = MAX_EXECUTION_TIME; /*ms*/ }
 
 		/* We're here so we must be idle. Schedule a Sporatic Process. */ 
 		/* NOTE: Invalid periodic processes are treated as idle. */ 
-		if (SpoP) {
-			PCurrent = SpoP; 
-			SetPreemptionTime(t);	
-			ContextSwitchToProcess(); 
-			continue; 
-		} 
-		else {
-			/* We're here so we must be idle and there must be no sporatic processes to run. */ 
-			PCurrent = &IdleProcess;
-			SetPreemptionTime(t);
-			ContextSwitchToProcess(); 			
-			continue; 
-		}
+		if (SpoP) { PCurrent = SpoP; } 
+		/* We're here so we must be idle and there must be no sporatic processes to run. */ 
+		else      { PCurrent = &IdleProcess; }
+
+		SetPreemptionTime(t);	
+		ContextSwitchToProcess(); 
+		continue; 
 	} 
 }
  
@@ -676,7 +686,7 @@ void PrintString (void) {
 	f = OS_InitFiFo(); 
 
 	OS_Wait(1); 
-	OS_Create(PrintChar,(int)f,DEVICE,1);
+	OS_Create(PrintChar,(int)f,DEVICE,2);
 
 	while (*msgp) {
 		OS_Write(f,(int)(*msgp++)); 
