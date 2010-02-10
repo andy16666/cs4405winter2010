@@ -18,8 +18,9 @@
  * 
  * Please define user processes in user.h, user.c. 
  */
-#include "ports.c"
+
 #include "os.h"
+#include "ports.h"
 #include "process.h"
 #include "fifo.h" 
 #include "semaphore.h"
