@@ -9,7 +9,7 @@
  *	Andrew Somerville <z19ar@unb.ca>	
  */
 #include "os.h"
-#include "ports.c"
+#include "ports.h"
 #include "interrupts.h"
 
 #define M6811_CPU_KHZ 400000
