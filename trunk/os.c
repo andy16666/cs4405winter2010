@@ -19,7 +19,7 @@
 
 
 #define M6811_CPU_KHZ 400000
-#define TIME_QUANTUM M6811_CPU_KHZ/16
+#define TIME_QUANTUM (M6811_CPU_KHZ/16)
 
 /* Processes */ 
 void PrintChar(void);	
