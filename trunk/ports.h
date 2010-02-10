@@ -1,3 +1,5 @@
+#define PORT_BASE 	0x1000
+
 /* Macros */
 #define SET_BIT(x)  |= x
 #define CLR_BIT(x)  &= ~x
@@ -100,5 +102,5 @@ TOF: Overflow has occurred.
 
 
 /* Address is defined in the `memory.x' file.  */
-volatile unsigned char __attribute__((section("ports"))) Ports[];
+#define Ports ((volatile unsigned char *)(PORT_BASE))
 
