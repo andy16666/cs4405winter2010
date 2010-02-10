@@ -12,4 +12,49 @@
 #include "os.h"
 #include "semaphore.h"
 
+int Semaphores[MAXSEM];
+process *SemQueues[MAXSEM]; 
 
+void OS_Signal(int s) {
+	OS_DI();
+	/* Release an instance of this semaphore. */ 
+	Semaphores[s]++; 
+	/* Release the next process from waiting on this semaphore, if any. */ 
+	MoveNextProcessFromWaitingQueue(s);
+	OS_EI();
+}
+
+void OS_InitSem(int s, int n) {
+	OS_DI();
+	/* Set the semaphore to the number of this resource that are available. */ 
+	Semaphores[s] = n; 
+	OS_EI(); 
+}
+
+void OS_Wait(int s) { 
+	OS_DI();
+	/* If resource is not available, move this process into the waiting state, and release the CPU. */ 
+	if (Semaphores[s] <= 0) {
+		MoveToWaitingQueue(PCurrent,s);
+		OS_Yield();  
+	}
+	/* Allocate an instance of the recourse. */ 
+	Semaphores[s]--; 
+	OS_EI(); 
+}
+
+void MoveToWaitingQueue(process *p, int s) {
+	p->state = WAITING; 
+	RemoveFromSchedulingQueue(p); 
+	SemQueues[s] = QueueAdd(p,SemQueues[s]); 
+}
+
+void MoveNextProcessFromWaitingQueue(int s) {
+	process *p; 
+	/* Remove the first process from the queue for the given semaphore, and make it ready. */ 
+	if (p = SemQueues[s]) {
+		SemQueues[s] = QueueRemove(p,SemQueues[s]); 
+		AddToSchedulingQueue(p); 
+		p->state = READY; 
+	}
+}
