@@ -10,64 +10,18 @@
  * m68hc11-gcc -g -mshort -Wl,-m,m68hc11elfb  -msoft-reg-count=0 os.c -o os.elf
  */
 #include "os.h"
+#include "process.h"
 #include "fifo.h" 
-#include "ports.h"
 #include "semaphore.h"
+#include "ports.h"
 #include "interrupts.h"
 #include "interrupts.c"
 
 
-
 #define M6811_CPU_KHZ 400000
-/* Maximum time any non-device process can execute in ms. */ 
-#define MAX_EXECUTION_TIME 100
-
-typedef volatile unsigned long time_t; 
-
-/* 
-  Process Table 
-*/
-typedef struct proc_struct {
-	PID pid;  	               /* Process ID. */ 
-	unsigned int Name;             /* Name of process */ 
-	unsigned int Level;            /* Scheduling level/queue */ 
-	int   Arg;                     /* Process argument */ 
-	char Stack[WORKSPACE]; 
-	char *SP;                     /* Last Stack Pointer */ 
-	char *ISP;                    /* Initial Stack Pointer */ 
-	void(*program_location)(void); /* Pointer to the process, to start it for the first time. */ 
-	BOOL running;                  /* Indicates if the process has been started yet. */ 
-
-	struct proc_struct* QueuePrev;     /* Pointer to the previous process of the same type, for SPORATIC and DEVICES. */ 
-	struct proc_struct* QueueNext;     /* Pointer to the next process of the same type. */ 
-	
-	time_t DevNextRunTime; 	       /* Device processes: run next at this time. */ 
-} process;
-
-typedef struct kernel_struct {
-	char *SP;                     /* Last Stack Pointer */ 
-} kernel; 
-
-/* Safe Interrupt Service Handlers */
-void ClockUpdateHandler (void) __attribute__((interrupt)); 
-void OC4Handler (void) __attribute__((interrupt)); 
-
-
-void ContextSwitchToProcess(void); /* Perform a context switch to PCurrent */ 
-void ContextSwitchToKernel(void);  /* Perform a context switch to PKernel  */
-
-/* Internal process management helpers. */ 
-void ClockUpdate(void); 
-void SwitchToProcess(void); 
-void ReturnToKernel(void); 
-process *GetPeriodicProcessByName(unsigned int n); 
-process *QueueAdd(process *p, process *Queue);
-process *QueueRemove(process *p, process *Queue);
-void SetPreemptionTime(time_t time);   
-void SetPreemptionTimerInterval(unsigned int miliseconds); 
+#define TIME_QUANTUM M6811_CPU_KHZ/16
 
 /* Processes */ 
-void Idle (void); 
 void PrintChar(void);	
 void PrintString(void);
 void PrintInit (void); 
@@ -77,15 +31,12 @@ void PrintSystemTime (void);
 fifo_t Fifos[MAXFIFO]; /* FIFOs */
 
 int Semaphores[MAXSEM];
+process *SemQueues[MAXSEM]; 
 
-/* Access all ports through this array */ 
-//volatile unsigned short Ports[];
-//volatile struct interrupt_vectors IV; 
-
-process P[MAXPROCESS]; /* Main process table.    */ 
-process *PCurrent;     /* Last Process to run    */ 
-process *DevP;         /* Device Process Queue   */ 
-process *SpoP;         /* Sproatic Process Queue */
+process P[MAXPROCESS]; /* Main process table.        */ 
+process *PCurrent;     /* Currently running process. */ 
+process *DevP;         /* Device Process Queue       */ 
+process *SpoP;         /* Sproatic Process Queue     */
 
 process IdleProcess; 
 kernel  PKernel;
@@ -95,7 +46,6 @@ int PPP[MAXPROCESS];
 int PPPMax[MAXPROCESS];
 
 time_t Clock;       /* Approximate time since system start in ms. */ 
-time_t TimeQuantum; /* Ticks per ms */ 
 
 void Reset (void) { 
 	unsigned int i; 
@@ -112,6 +62,7 @@ void Reset (void) {
 
 int main() {
 	unsigned int i; 
+	char *test = "\r                     ABCDEFGHIJKLMNOPQRSTUVWXYZ\r"; 
 
 	/* Set the timer prescale factor to 16 (1,1)...Must be set very soon after startup!!! */
 	Ports[M6811_TMSK2] SET_BIT(M6811_BIT0);
@@ -139,6 +90,13 @@ int main() {
 	PrintInit(); 
 	OS_Create(PrintSystemTime,0,DEVICE,500);
 	OS_Create(PrintTime,0,DEVICE,10);
+	OS_Create(PrintString,(int)test,SPORADIC,10);
+	OS_Create(PrintString,(int)test,SPORADIC,10);
+	OS_Create(PrintString,(int)test,SPORADIC,10);
+	OS_Create(PrintString,(int)test,SPORADIC,10);
+	OS_Create(PrintString,(int)test,SPORADIC,10);
+	OS_Create(PrintString,(int)test,SPORADIC,10);
+	OS_Create(PrintString,(int)test,SPORADIC,10);
 	OS_DI(); 
 
 	OS_Start();
@@ -149,7 +107,6 @@ int main() {
 void OS_Init(void) {	
 	int i; 
 
-	TimeQuantum = (M6811_CPU_KHZ/16);
 	
 	/* Initialize the clock */ 
 	Clock    = 0;	
@@ -170,8 +127,8 @@ void OS_Init(void) {
 	/* Initialize processes */ 
 	for (i = 0; i < MAXPROCESS; i++) {
 		P[i].pid = INVALIDPID; 
-		P[i].QueuePrev = 0; 
-		P[i].QueueNext = 0;
+		P[i].Prev = 0; 
+		P[i].Next = 0;
 		/* Initial stack pointer points at the end of the stack. */ 
 		P[i].ISP = &(P[i].Stack[WORKSPACE-1]); 
 	}	
@@ -185,7 +142,7 @@ void OS_Init(void) {
 	IdleProcess.Name = IDLE; 
 	IdleProcess.ISP  = &(IdleProcess.Stack[WORKSPACE-1]);
 	IdleProcess.program_location = &Idle; 
-	IdleProcess.running = FALSE;
+	IdleProcess.state = NEW;
 }
  
 /* Actually start the OS */
@@ -215,7 +172,7 @@ void OS_Start(void) {
 					PCurrent = p;
 					break; 
 				}
-			} while ((p = p->QueueNext) && (p != DevP)); 
+			} while ((p = p->Next) && (p != DevP)); 
 			
 			/* If a device process is ready, run it. */ 
 			if (PCurrent) {	
@@ -232,7 +189,7 @@ void OS_Start(void) {
 			else {
 				p = DevP; 
 				t = p->DevNextRunTime; 
-				while ((p = p->QueueNext) && (p != DevP)) { 
+				while ((p = p->Next) && (p != DevP)) { 
 					if (p->DevNextRunTime < t) {
 						t = p->DevNextRunTime; 
 					}
@@ -248,11 +205,11 @@ void OS_Start(void) {
 			}
 			/* If the process isn't idle, try to look it up. */ 
 			if (PPP[ppp_next] != IDLE) {
-				PCurrent = GetPeriodicProcessByName(PPP[ppp_next]); 
+				PCurrent = GetPeriodicProcessByName(PPP[ppp_next]); 	
 			}
 
 			/* Increment ppp_next circularly. */
-			ppp_next = (++ppp_next >= PPPLen)?0:ppp_next;
+			circularIncrement(&ppp_next, PPPLen); 
 
 			/* If a periodic process is ready to run, run it. */ 
 			if (PCurrent) {
@@ -267,7 +224,9 @@ void OS_Start(void) {
 
 		/* We're here so we must be idle. Schedule a Sporatic Process. */ 
 		/* NOTE: Invalid periodic processes are treated as idle. */ 
-		if (SpoP) { PCurrent = SpoP; } 
+		if (SpoP) {
+			PCurrent = SpoP; 
+		} 
 		/* We're here so we must be idle and there must be no sporatic processes to run. */ 
 		else      { PCurrent = &IdleProcess; }
 
@@ -305,20 +264,17 @@ PID OS_Create(void (*f)(void), int arg, unsigned int level, unsigned int n) {
 	p->Name       = n; 
 	p->Level      = level;
 	p->Arg        = arg;
-	p->running    = FALSE; 	
+	p->state      = NEW; 	
 
-	p->QueueNext  = 0;
-	p->QueuePrev  = 0;  
+	p->Next  = 0;
+	p->Prev  = 0;  
 
 	p->DevNextRunTime = 0; 
 
 	/* Set the initial program counter to the address of the function representing the process. */ 
 	p->program_location = f;
 
-	/* Add Sporatic Processes to the Sporatic Queue */ 
-	if (p->Level == SPORADIC) { SpoP = QueueAdd(p, SpoP); }
-	/* Add Device Processes to the Device Queue */ 
-	if (p->Level == DEVICE)   { DevP = QueueAdd(p, DevP); }
+	AddToSchedulingQueue(p); 
 	
 	OS_EI(); 
 	return p->pid; 
@@ -328,10 +284,8 @@ void OS_Terminate() {
 	OS_DI(); 
 	PCurrent->pid = INVALIDPID;
 
-	/* Remove the process from the SPORATIC queue */
-	if (PCurrent->Level == SPORADIC) { SpoP = QueueRemove(PCurrent, SpoP); } 
-	/* Remove the process from the DEVICE queue */
-	if (PCurrent->Level == DEVICE)   { DevP = QueueRemove(PCurrent, DevP); }
+	RemoveFromSchedulingQueue(PCurrent); 
+
 	/* Return to the kernel without saving the context. */ 
 	ReturnToKernel(); 
 } 
@@ -339,8 +293,8 @@ void OS_Terminate() {
 void OS_Yield() {
 	/* Move sporatic process to the end of the Queue */ 
 	if (PCurrent->Level == SPORADIC) { 
-		if (SpoP->QueueNext) {
-			SpoP = SpoP->QueueNext; 
+		if (SpoP->Next) {
+			SpoP = SpoP->Next; 
 		}
 	} 
 	ContextSwitchToKernel(); 
@@ -385,8 +339,6 @@ void OS_Write(FIFO f, int val) {
 	OS_EI();
 }
 
-
-
 void OS_InitSem(int s, int n) {
 	OS_DI();
 	/* Set the semaphore to the number of this resource that are available. */ 
@@ -394,11 +346,12 @@ void OS_InitSem(int s, int n) {
 	OS_EI(); 
 }
 
-void OS_Wait(int s) {
+void OS_Wait(int s) { 
 	OS_DI();
-	/* While resource is not available, release the CPU */ 
-	while (Semaphores[s] <= 0) { 
-		OS_Yield(); 
+	/* If resource is not available, move this process into the waiting state, and release the CPU. */ 
+	if (Semaphores[s] <= 0) {
+		MoveToWaitingQueue(PCurrent,s);
+		OS_Yield();  
 	}
 	/* Allocate an instance of the recourse. */ 
 	Semaphores[s]--; 
@@ -407,8 +360,10 @@ void OS_Wait(int s) {
 
 void OS_Signal(int s) {
 	OS_DI();
-	/* Release resource. */ 
+	/* Release an instance of this semaphore. */ 
 	Semaphores[s]++; 
+	/* Release the next process from waiting on this semaphore, if any. */ 
+	MoveNextProcessFromWaitingQueue(s);
 	OS_EI();
 }
 
@@ -418,7 +373,6 @@ BOOL OS_Read(FIFO f, int *val) {
 	
 	/* If there is nothing in the FIFO, fail at reading */
 	if(0 == fifo->nElems) {
-
 		return FALSE;
 	}
 	
@@ -431,40 +385,58 @@ BOOL OS_Read(FIFO f, int *val) {
 	return TRUE;
 }
 
-/* Set OC4 to interrupt at a specific absolute time in the future. */ 
+void MoveToWaitingQueue(process *p, int s) {
+	p->state = WAITING; 
+	RemoveFromSchedulingQueue(p); 
+	SemQueues[s] = QueueAdd(p,SemQueues[s]); 
+}
+
+void MoveNextProcessFromWaitingQueue(int s) {
+	process *p; 
+	/* Remove the first process from the queue for the given semaphore, and make it ready. */ 
+	if (p = SemQueues[s]) {
+		SemQueues[s] = QueueRemove(p,SemQueues[s]); 
+		AddToSchedulingQueue(p); 
+		p->state = READY; 
+	}
+}
+
+void AddToSchedulingQueue(process *p) {
+	/* Add Sporatic Processes to the Sporatic Queue */ 
+	if (p->Level == SPORADIC) { SpoP = QueueAdd(p, SpoP); }
+	/* Add Device Processes to the Device Queue */ 
+	if (p->Level == DEVICE)   { DevP = QueueAdd(p, DevP); }
+}
+
+void RemoveFromSchedulingQueue(process *p) {
+	/* Remove the process from the SPORATIC queue */
+	if (p->Level == SPORADIC) { SpoP = QueueRemove(p, SpoP); } 
+	/* Remove the process from the DEVICE queue */
+	if (p->Level == DEVICE)   { DevP = QueueRemove(p, DevP); }
+}
+
 void SetPreemptionTime(time_t time) {
 	SetPreemptionTimerInterval((unsigned int)(time - Clock)); 
 }
 
-/* Set OC4 to interrupt in a number of miliseconds. */ 
 void SetPreemptionTimerInterval(unsigned int miliseconds) {
 	unsigned int *TOC4_address; 
 	unsigned int *timer_address; 
 	
-	/* Make sure these are read as 16 bit numbers. */ 
+	/* Make sure these are read as signel 16 bit numbers. */ 
 	TOC4_address  = (unsigned int*)&(Ports[M6811_TOC4_HIGH]);
 	timer_address = (unsigned int*)&(Ports[M6811_TCNT_HIGH]);
-	
-	*TOC4_address = (*timer_address + (miliseconds * TimeQuantum)); 
 
-
+	/* Read the tick register, add a time to it, and store it in the OC4 compare register. */ 
+	*TOC4_address = (*timer_address + (miliseconds * TIME_QUANTUM)); 
+	/* Set OL4 */ 
 	Ports[M6811_TCTL1] SET_BIT(M6811_BIT2);
-	
+	/* Set OC4F */ 	
 	Ports[M6811_TFLG1] SET_BIT(M6811_BIT4);
 	/* Unmask OC4 interrupt */
 	Ports[M6811_TMSK1] SET_BIT(M6811_BIT4);
 }
 
-
-/* Performs a context switch, saving the given current stack pointer. 
-	Used ONLY by:
-		- ContextSwitchToKernel 
-		- ContextSwitchToProcess
-   This function creates a black hole within which we can perform a 
-   context switch without it affecting the calling process. 
-*/ 
-
-/* Called directly to transfer control to the kernel, saving current context. */ 
 void ContextSwitchToKernel(void)  { 
 	OS_DI(); 
 	/* Interrupt to a SwitchToProcess() or ReturnToKernel() ISRs. */ 
@@ -472,7 +444,7 @@ void ContextSwitchToKernel(void)  {
 	/* This function returns when rti is called. */
 	OS_EI();
 }
-/* Called directly to transfer control to PCurrent, saving current context. */ 
+
 void ContextSwitchToProcess(void) { 
 	/* Interrupt to a SwitchToProcess() or ReturnToKernel() ISRs. */ 
 	asm volatile (" swi "); 
@@ -484,9 +456,7 @@ void UnhandledInterrupt (void) { return; }
 
 /* Interrupt service routine for updating the clock. */ 
 void ClockUpdateHandler (void) { 
-	OS_DI(); 
 	ClockUpdate(); 
-	OS_EI(); 
 }
 
 /* 
@@ -521,9 +491,9 @@ void ClockUpdate(void) {
 	/* Add on the residual from the last update. */ 
 	elapsed_time += residual; 
 
-	residual = elapsed_time % TimeQuantum; 
+	residual = elapsed_time % TIME_QUANTUM; 
 
-	Clock += (elapsed_time-residual)/TimeQuantum; 
+	Clock += (elapsed_time-residual)/TIME_QUANTUM; 
 
 	/* Account for the residual during the next update. */ 
 	last_timer_value = timer_value; 
@@ -539,6 +509,7 @@ process *GetPeriodicProcessByName(unsigned int n) {
 		if ((p->pid != INVALIDPID) 
 		&& (p->Level == PERIODIC) 
 		&& (p->Name == n)
+		&& (PCurrent->state != WAITING) 
 		) {
 			return p; 
 		}		
@@ -550,22 +521,24 @@ process *QueueAdd(process *p, process *Queue) {
 	/* The graph has one or more nodes. */ 
 	if (Queue) {
 		/* The graph has more than one existing node. */ 
-		if (Queue->QueueNext && Queue->QueuePrev) {
-			p->QueuePrev = Queue->QueuePrev; 
-			p->QueueNext = Queue; 
-			Queue->QueuePrev->QueueNext = p; 
-			Queue->QueuePrev = p; 
+		if (Queue->Next && Queue->Prev) {
+			p->Prev = Queue->Prev; 
+			p->Next = Queue; 
+			Queue->Prev->Next = p; 
+			Queue->Prev = p; 
 		} 
 		/* The graph has exactly one existing node. */ 
 		else {
-			Queue->QueueNext = p; 
-			Queue->QueuePrev = p;
-			p->QueueNext = Queue; 
-			p->QueuePrev = Queue;
+			p->Next = Queue; 
+			p->Prev = Queue;
+			Queue->Next = p; 
+			Queue->Prev = p;			
 		}
 	} 
 	/* The graph has no existing nodes. */ 
 	else { 
+		p->Next = 0; 
+		p->Prev = 0;
 		Queue = p; 
 	} 
 	return Queue; 
@@ -577,21 +550,25 @@ process *QueueRemove(process *p, process *Queue) {
 		/* Queue points to the node to be removed. */ 
 		if (Queue == p) { 
 			/* There is more than one node */ 
-			if (Queue->QueueNext) { Queue = Queue->QueueNext; }
+			if (Queue->Next) { Queue = Queue->Next; }
 			/* There is only one node and it is the one to be removed. */ 
 			else                  { return 0; }
 		}
 		/* The graph has only two nodes  */ 
-		if (p->QueuePrev == p->QueueNext) {
-			Queue->QueuePrev = 0; 
-			Queue->QueueNext = 0;
+		if (p->Prev == p->Next) {
+			Queue->Prev = 0; 
+			Queue->Next = 0;
 		}
 		/* The graph has more than two nodes. */ 
 		else {
-			p->QueuePrev->QueueNext = p->QueueNext; 
-			p->QueueNext->QueuePrev = p->QueuePrev; 
+			p->Prev->Next = p->Next; 
+			p->Next->Prev = p->Prev; 
 		}
 	}
+	
+	p->Next = 0; 
+	p->Prev = 0;
+ 
 	return Queue; 
 }
 
@@ -600,12 +577,7 @@ void OC4Handler(void) {
 	asm(" swi ");
 }
 
-/* 
-   Directly return control to kernel. 
-   Called ONLY by:
-    - SWI from ContextSwitch() 
-    - OS_Terminate(). 
-*/ 
+
 void ReturnToKernel(void)  {
 	OS_DI(); 	
 	/* Store the stack pointer in the given location. */ 
@@ -624,8 +596,7 @@ void ReturnToKernel(void)  {
 	/* Return control to the kernel */ 
 	asm volatile (" rti "); 
 }
-
-/* Transfer control PCurrent. ONLY called by SWI from ContextSwitch() in kernel mode. */ 
+ 
 void SwitchToProcess(void) {
 	 /* Store the stack pointer in the given location. */ 
 	asm volatile (" sts %0 " : "=m" (PKernel.SP) : : "memory"); 
@@ -637,16 +608,16 @@ void SwitchToProcess(void) {
 	IV.SWI = ReturnToKernel;
 	
 	/* If the process has already been running, we can return to its last context. */ 
-	if (PCurrent->running) {		
+	if (PCurrent->state == READY) {		
 		/* Load Process Stack Pointer */ 
 		asm volatile (" lds %0 " : : "m" (PCurrent->SP) : "memory"); 
 		/* Return control to running process. */ 
 		asm volatile (" rti "); 
 	} 
 	/* If the process has not been started, we need to start it for the first time. */ 
-	else {
-		/* Set the process to the running state. */
-		PCurrent->running = TRUE; 
+	else if (PCurrent->state == NEW) {
+		/* Set the process to the ready state. */
+		PCurrent->state = READY; 
 		/* Load Process Stack Pointer */ 
 		asm volatile (" lds %0 " : : "m" (PCurrent->ISP) : "memory"); 
 		/* Run process for the first time. */
@@ -656,16 +627,21 @@ void SwitchToProcess(void) {
 		/* When the process ends run terminate to clean it up. */ 
 		OS_Terminate(); 
 	}
+	else {
+		OS_Abort(); 
+	}
 }
 
-
+void circularIncrement(int *i, int max) {
+	*i = (++(*i) >= max)?0:*i;
+}
 
 void incrementFifoRead(fifo_t *f) {
-	f->read = (++(f->read) >= FIFOSIZE) ? 0 : f->read;
+	circularIncrement(&f->read, FIFOSIZE); 
 }
 
 void incrementFifoWrite(fifo_t *f) {
-	f->write = (++(f->write) >= FIFOSIZE) ? 0 : f->write;
+	circularIncrement(&f->write, FIFOSIZE); 
 }
 
 void PrintInit(void) {
@@ -694,6 +670,7 @@ void PrintString (void) {
 	f = OS_InitFiFo(); 
 
 	OS_Wait(1); 
+	OS_Yield(); 	
 	OS_Create(PrintChar,(int)f,DEVICE,1);
 	while (*msgp) {
 		OS_Write(f,(int)(*msgp++)); 
@@ -752,7 +729,7 @@ void PrintTime (void) {
 
 
 
-		OS_Wait(0); 	
+		OS_Wait(0); 
 		time_p = time_s; 
 		while (*time_p) {
 			while (!(Ports[M6811_SCSR] & M6811_TDRE))

@@ -29,10 +29,10 @@ volatile struct interrupt_vectors __attribute__((section("vectors"))) IV = {
    IRQ:                    UnhandledInterrupt, /* IRQ - unused */
    XIRQ:                   UnhandledInterrupt, /* XIRQ - unused */
    SWI:                    UnhandledInterrupt, /* SWI: Trap function used for voluntary context switching. */ 
-   illegal_handler:        UnhandledInterrupt, /* illegal -unused */
-   cop_fail_handler:       UnhandledInterrupt, /* unused */
-   cop_clock_handler:      UnhandledInterrupt, /* unused */
-   RTII:                   UnhandledInterrupt, /*  */
-   Reset:                  Reset  /* reset vector - go to premain */
+   illegal_handler:        UnhandledInterrupt, 
+   cop_fail_handler:       UnhandledInterrupt, 
+   cop_clock_handler:      UnhandledInterrupt, 
+   RTII:                   UnhandledInterrupt, 
+   Reset:                  Reset               
 };
 

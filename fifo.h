@@ -21,6 +21,8 @@ typedef struct fifo {
 	int write;		/* The index of the last element written */
 } fifo_t;
 
+extern fifo_t Fifos[MAXFIFO];
+
 void incrementFifoRead (fifo_t *f); 
 void incrementFifoWrite(fifo_t *f); 
 
