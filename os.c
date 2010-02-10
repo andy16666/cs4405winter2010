@@ -17,7 +17,6 @@
 #include "interrupts.h"
 #include "interrupts.c"
 
-
 #define M6811_CPU_KHZ 400000
 #define TIME_QUANTUM (M6811_CPU_KHZ/16)
 
@@ -47,6 +46,12 @@ int PPPMax[MAXPROCESS];
 
 time_t Clock;       /* Approximate time since system start in ms. */ 
 
+/* Accounting */ 
+time_t KTime = 0;     /* Total time spent in the kernel, including context switches to the kernel. */  
+time_t UTime = 0;     /* Total time spent in user processes including context switches to them. */ 
+time_t ITime = 0;     /* Total time spent running the idle process. */ 
+time_t LastTime = 0;  /* Temporary variable used in calculation. */ 
+
 void Reset (void) { 
 	unsigned int i; 
 	/* Set the timer prescale factor to 16 (1,1)...Must be set very soon after startup!!! */
@@ -56,13 +61,12 @@ void Reset (void) {
 	/* Wait a few thousand cycles for the cpu timing to settle. */   
 	for (i = 1; i !=0; i++); 
 
-	
 	main(); 
 }
 
 int main() {
 	unsigned int i; 
-	char *test = "\r                     ABCDEFGHIJKLMNOPQRSTUVWXYZ\r"; 
+	char *test = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"; 
 
 	/* Set the timer prescale factor to 16 (1,1)...Must be set very soon after startup!!! */
 	Ports[M6811_TMSK2] SET_BIT(M6811_BIT0);
@@ -107,7 +111,6 @@ int main() {
 void OS_Init(void) {	
 	int i; 
 
-	
 	/* Initialize the clock */ 
 	Clock    = 0;	
 	ClockUpdate(); 
@@ -154,6 +157,8 @@ void OS_Start(void) {
 	IV.SWI = SwitchToProcess; 
 
 	ppp_next = 0; 
+
+	LastTime = Clock; 
 
 	/* Scheduler. */ 
 	while (1) {
@@ -339,6 +344,15 @@ void OS_Write(FIFO f, int val) {
 	OS_EI();
 }
 
+void OS_Signal(int s) {
+	OS_DI();
+	/* Release an instance of this semaphore. */ 
+	Semaphores[s]++; 
+	/* Release the next process from waiting on this semaphore, if any. */ 
+	MoveNextProcessFromWaitingQueue(s);
+	OS_EI();
+}
+
 void OS_InitSem(int s, int n) {
 	OS_DI();
 	/* Set the semaphore to the number of this resource that are available. */ 
@@ -358,16 +372,6 @@ void OS_Wait(int s) {
 	OS_EI(); 
 }
 
-void OS_Signal(int s) {
-	OS_DI();
-	/* Release an instance of this semaphore. */ 
-	Semaphores[s]++; 
-	/* Release the next process from waiting on this semaphore, if any. */ 
-	MoveNextProcessFromWaitingQueue(s);
-	OS_EI();
-}
-
-
 BOOL OS_Read(FIFO f, int *val) {
 	fifo_t *fifo = &Fifos[f];
 	
@@ -383,6 +387,14 @@ BOOL OS_Read(FIFO f, int *val) {
 	fifo->nElems--;	
 	OS_EI();
 	return TRUE;
+}
+
+void incrementFifoRead(fifo_t *f) {
+	circularIncrement(&f->read, FIFOSIZE); 
+}
+
+void incrementFifoWrite(fifo_t *f) {
+	circularIncrement(&f->write, FIFOSIZE); 
 }
 
 void MoveToWaitingQueue(process *p, int s) {
@@ -439,6 +451,11 @@ void SetPreemptionTimerInterval(unsigned int miliseconds) {
 
 void ContextSwitchToKernel(void)  { 
 	OS_DI(); 
+	ClockUpdate(); 
+	/* Store Accounting Information. */
+	if (PCurrent == &IdleProcess) { ITime += (Clock - LastTime); }
+	else                          { UTime += (Clock - LastTime); }	
+	LastTime = Clock; 
 	/* Interrupt to a SwitchToProcess() or ReturnToKernel() ISRs. */ 
 	asm volatile (" swi "); 
 	/* This function returns when rti is called. */
@@ -446,13 +463,15 @@ void ContextSwitchToKernel(void)  {
 }
 
 void ContextSwitchToProcess(void) { 
+	ClockUpdate(); 
+	KTime += (Clock - LastTime);	
+	LastTime = Clock; 	
 	/* Interrupt to a SwitchToProcess() or ReturnToKernel() ISRs. */ 
 	asm volatile (" swi "); 
 	/* This function returns when rti is called. */
 }
 
 void UnhandledInterrupt (void) { return; }  
-
 
 /* Interrupt service routine for updating the clock. */ 
 void ClockUpdateHandler (void) { 
@@ -574,7 +593,7 @@ process *QueueRemove(process *p, process *Queue) {
 
 /* Preemption must be handled differently from traps to preserve local variables. */ 
 void OC4Handler(void) {
-	asm(" swi ");
+	ContextSwitchToKernel(); 
 }
 
 
@@ -603,10 +622,11 @@ void SwitchToProcess(void) {
 	/* Correct for function call. */
 	PKernel.SP++; 
 	PKernel.SP++;
+	
 	/* Set interrupt handlers. */ 
 	IV.OC4 = OC4Handler; /* OC4 must jump out to a proper interrupt handler to preserve local variables. */ 
 	IV.SWI = ReturnToKernel;
-	
+
 	/* If the process has already been running, we can return to its last context. */ 
 	if (PCurrent->state == READY) {		
 		/* Load Process Stack Pointer */ 
@@ -636,13 +656,6 @@ void circularIncrement(int *i, int max) {
 	*i = (++(*i) >= max)?0:*i;
 }
 
-void incrementFifoRead(fifo_t *f) {
-	circularIncrement(&f->read, FIFOSIZE); 
-}
-
-void incrementFifoWrite(fifo_t *f) {
-	circularIncrement(&f->write, FIFOSIZE); 
-}
 
 void PrintInit(void) {
 	static BOOL initialized = FALSE; 
