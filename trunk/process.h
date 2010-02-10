@@ -1,6 +1,5 @@
-#ifndef __process_h__
-#define __process_h__
-
+#ifndef __PROCESS_H__
+#define __PROCESS_H__
 /*
  * process.h
  * Header file with data types for process management.
@@ -10,6 +9,11 @@
  *	Andrew Somerville <z19ar@unb.ca>	
  */
 #include "os.h"
+#include "ports.c"
+#include "interrupts.h"
+
+#define M6811_CPU_KHZ 400000
+#define TIME_QUANTUM (M6811_CPU_KHZ/16)
 
 /* Maximum time any non-device process can execute in ms. */ 
 #define MAX_EXECUTION_TIME 100
@@ -48,8 +52,19 @@ extern process P[];           /* Main process table.       */
 extern process *PCurrent;     /* Currently running process */ 
 extern process *DevP;         /* Device Process Queue      */ 
 extern process *SpoP;         /* Sproatic Process Queue    */
+
 extern process IdleProcess;   /* Pseudo-process to run when ther is nothing else to do. */ 
 extern kernel  PKernel;       /* Contains information required to reuturn to kernel mode. */ 
+
+/* Accounting */ 
+extern time_t KTime;         /* Total time spent in the kernel, including context switches to the kernel. */  
+extern time_t UTime;         /* Total time spent in user processes including context switches to them. */ 
+extern time_t ITime;         /* Total time spent running the idle process. */ 
+extern time_t LastTime;      /* Temporary variable used in calculation. */ 
+
+void Reset (void) __attribute__((interrupt)); 
+
+void UnhandledInterrupt (void) __attribute__((interrupt)); 
 
 /* Handles tick register overflows. */
 void ClockUpdateHandler (void) __attribute__((interrupt)); 
