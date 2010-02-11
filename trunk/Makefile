@@ -17,6 +17,6 @@ $(OBJECTS): %.o: %.c
 	$(CC) -c $(CPPFLAGS) $(CFLAGS) $< -o $@
 
 clean:
-	-rm *.elf $(OBJECTS)
+	-rm *.elf *.s19 $(OBJECTS)
 
 .PHONY: clean
