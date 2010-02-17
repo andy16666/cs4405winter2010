@@ -28,6 +28,12 @@
 #include "interrupts.h"
 #include "user.h"
 
+int main(void) {
+	IVReset = Reset;
+	while(1);		
+	return 0;	
+}
+
 void Reset() {
 	unsigned int i; 
 	
@@ -56,24 +62,10 @@ void Reset() {
 	_sys_init_lcd(); 
 	sys_print_lcd("Start"); 
 
-	/* user.h, user.c: define you processes here. */ 
+	/* user.h, user.c: define you processes there. */ 
 	ProcessInit(); 
 
 	OS_Start();
-}
- 
-/* main - simple reset vector initialization.
- * 
- * this is needed to work with the doanloader. Allows use of the
- * reset button when running in 'special test' mode
- *
- * @return values
- * int:  some ANSI spec requires a return from main 
- */
-int main(void) {
-	IVReset = Reset; 	/* register the reset handler */
-	while(1);			/* hang around */
-	return 0;	
 }
  
 /* Initialize the OS */
@@ -95,7 +87,7 @@ void OS_Init(void) {
 	PCurrent   = 0; 
 	PKernel.SP = 0; 
 	
-	/* Initiaint ppp_next;     /* Queue index of the next periodic process. */ lize processes */ 
+	/* Initialize processes */ 
 	for (i = 0; i < MAXPROCESS; i++) {
 		P[i].pid = INVALIDPID; 
 		P[i].Prev = 0; 
@@ -103,6 +95,7 @@ void OS_Init(void) {
 		/* Initial stack pointer points at the end of the stack. */ 
 		P[i].ISP = &(P[i].Stack[WORKSPACE-1]); 
 	}	
+
 	/* Initialize fifos. */ 
 	for (i = 0; i < MAXFIFO; i++) {
 		Fifos[i].fid = INVALIDFIFO; 
@@ -157,7 +150,6 @@ void OS_Start(void) {
 				ContextSwitchToProcess(); 
 				continue; 
 			}			
-
 			/* Find the time of the next device process, t. */ 
 			else {
 				p = DevP; 
@@ -169,14 +161,15 @@ void OS_Start(void) {
 				} 
 			}
 		}
-		/* No device processes to run *now*, to try for a periodic process. */ 
+
+		/* No device processes to run *now*, so try for a periodic process. */ 
 		if (PPPLen) {
-			/* Determine the time of the next interupt. */ 
+			/* Determine the maximum time to allot the next periodic process, t. */ 
 			if (!t || ((Clock + PPPMax[ppp_next]) <  t)) {
 				t = Clock + PPPMax[ppp_next]; 
 			}
 
-			/* If the process isn't idle, try to look it up. */ 
+			/* If the current next process isn't idle, try to look it up. */ 
 			if (PPP[ppp_next] != IDLE) {
 				PCurrent = GetPeriodicProcessByName(PPP[ppp_next]); 	
 			}
@@ -187,7 +180,11 @@ void OS_Start(void) {
 			if (PCurrent) {
 				SetPreemptionTime(t);
 				ContextSwitchToProcess();
-				continue; 
+				ClockUpdate(); 
+				/* If we used up our time slice, continue to the next process. */ 
+				if (t < Clock) { continue; }
+				/* Otherwise fall through to schedule a sporadic process or idle time. */ 
+				else           { Pcurrent = 0; }
 			}
 		}
 
@@ -199,17 +196,13 @@ void OS_Start(void) {
 		/* We're here so we must be idle and there must be no sporadic processes to run. */ 
 		else      { PCurrent = &IdleProcess; }
 		
-		/* Run sporasic of idle process. */ 	
+		/* Run sporasic or idle process. */ 	
 		SetPreemptionTime(t);	
 		ContextSwitchToProcess(); 
 		continue;
 	} 
 }
  
-void OS_Abort() {
-	asm(" stop "); 
-}
-
 PID OS_Create(void (*f)(void), int arg, unsigned int level, unsigned int n) {	
 	process *p; 
 	int i; 
@@ -248,7 +241,6 @@ PID OS_Create(void (*f)(void), int arg, unsigned int level, unsigned int n) {
 	AddToSchedulingQueue(p); 
 	
 	if (!I) { OS_EI(); }
-	
 	return p->pid; 
 }
  
@@ -264,15 +256,17 @@ void OS_Terminate() {
 
 void OS_Yield() {
 	/* Move sporatic process to the end of the Queue */ 
-	if (PCurrent->Level == SPORADIC) { 
-		if (SpoP->Next) { 
-			SpoP = SpoP->Next; 
-		}
+	if ((PCurrent->Level == SPORADIC) && (SpoP->Next)) { 
+		SpoP = SpoP->Next; 
 	} 
 	ContextSwitchToKernel(); 
 }
 
 int OS_GetParam() {
 	return PCurrent->Arg; 
+}
+
+void OS_Abort() {
+	asm(" stop "); 
 }
 
