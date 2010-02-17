@@ -1,13 +1,13 @@
 /*
  * os.c
- * Core operating system kernel code. Designed for the Rug Warrior
- * robot with the HC11 CPU.
+ * Operating system. Designed for the Rug Warrior
+ * robot with the 68HC11 CPU.
  *
  * Authors: 
  *	Joel Goguen <r1hh8@unb.ca>
  *	Andrew Somerville <z19ar@unb.ca>
  * 
- * m68hc11-gcc -static -g -mshort  -Wl,-m,m68hc11elfb -O3 -msoft-reg-count=0 process.c semaphore.c fifo.c os.c -o os.elf
+ * Build using supplied make.bat. Number of soft registers must be set to 0. 
  *
  * Process management functions and definitions: 
  *   process.h, process.c
