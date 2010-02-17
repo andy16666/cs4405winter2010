@@ -1,4 +1,17 @@
+/*
+ * ports.h
+ * Port and register definitions. 
+ *
+ * Authors: 
+ * 	Joel Goguen <r1hh8@unb.ca>
+ *	Andrew Somerville <z19ar@unb.ca>	
+ */
+#ifndef __PORTS_H__
+#define __PORTS_H__
+ 
 #define PORT_BASE 	0x1000
+/* Can be used as an array to access ports. */
+#define Ports ((volatile unsigned char *)(PORT_BASE))
 
 /* Macros */
 #define SET_BIT(x)  |= x
@@ -99,8 +112,4 @@ TOF: Overflow has occurred.
 #define M6811_TDRE	0x80	/* Transmit Data Register Empty */
 
 #define M6811_DEF_BAUD M6811_BAUD_DIV_4 /* 1200 baud */
-
-
-/* Address is defined in the `memory.x' file.  */
-#define Ports ((volatile unsigned char *)(PORT_BASE))
-
+#endif
