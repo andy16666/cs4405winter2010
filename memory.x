@@ -1,16 +1,22 @@
-/* memory.x*/
-
 MEMORY
 {
-  page0 (rw)    : ORIGIN = 0x0, LENGTH = 0x0100
-  ports (rw)    : ORIGIN = 0x1000, LENGTH = 0x003F
-  text (rx)     : ORIGIN = 0x8000, LENGTH = 0x6000
-  eeprom        : ORIGIN = 0xB600, LENGTH = 0x0200  
-  data          : ORIGIN = 0xC000, LENGTH = 0x5000
-  vectors (rwx) : ORIGIN = 0xFFC0, LENGTH = 0x0040
+  page0 (rwx) : ORIGIN = 0x0000, LENGTH = 0x0020
+  lcdram (rwx): ORIGIN = 0x0020, LENGTH = 0x00D0
+  ports (rw)  : ORIGIN = 0x1000, LENGTH = 0x0034
+  text (rx)   : ORIGIN = 0x8000, LENGTH = 0x3FBF
+  vectors (rw): ORIGIN = 0xBFC0, LENGTH = 0x0040
+  stacks (rw) : ORIGIN = 0xC000, LENGTH = 0x1000
+  data (rwx)  : ORIGIN = 0xD000, LENGTH = 0x2E00
+  lcdbuf (rwx): ORIGIN = 0xFE00, LENGTH = 0x00D0
+
 }
 
-PROVIDE (_stack = 0xF000);
+SECTIONS
+{
+    .lcd :
+       {
+         *(.lcd)
+       } > lcdbuf
+}
 
-/*PROVIDE (Ports = 0x1000);
-PROVIDE (IV = 0xBFC0);*/
+PROVIDE (_stack = 0xFFBF);

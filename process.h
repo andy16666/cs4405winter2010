@@ -12,7 +12,7 @@
 #include "ports.h"
 #include "interrupts.h"
 
-#define M6811_CPU_KHZ 400000
+#define M6811_CPU_KHZ 2000
 #define TIME_QUANTUM (M6811_CPU_KHZ/16)
 
 /* Maximum time any non-device process can execute in ms. */ 
@@ -22,7 +22,7 @@
 #define READY 1
 #define WAITING 2
 
-typedef volatile unsigned long time_t; 
+typedef volatile long time_t; 
 
 typedef struct proc_struct {
 	PID pid;  	               /* Process ID. */ 
@@ -56,11 +56,7 @@ extern process *SpoP;         /* Sproatic Process Queue    */
 extern process IdleProcess;   /* Pseudo-process to run when ther is nothing else to do. */ 
 extern kernel  PKernel;       /* Contains information required to reuturn to kernel mode. */ 
 
-/* Accounting */ 
-extern time_t KTime;         /* Total time spent in the kernel, including context switches to the kernel. */  
-extern time_t UTime;         /* Total time spent in user processes including context switches to them. */ 
-extern time_t ITime;         /* Total time spent running the idle process. */ 
-extern time_t LastTime;      /* Temporary variable used in calculation. */ 
+BOOL CheckInterruptMask (); 
 
 void Reset (void) __attribute__((interrupt)); 
 
