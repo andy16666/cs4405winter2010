@@ -1,92 +1,94 @@
-/*
- *  lcd.c
- *  
- *  Template for using the LCD with the robot.
- */
-
-#include "interrupts.c"
 #include "lcd.h"
-#include "ports.h"
-
-#define MAX_CHAR_COUNT 16
-
-void sys_send_command_lcd(unsigned char operation, unsigned char operand) {
-	Ports[M6811_PORTA] CLR_BIT(M6811_BIT4); 
-	Ports[M6811_HPRIO] CLR_BIT(M6811_BIT5); /* BIT5 = MDA */  
-	Ports[M6811_PORTA] CLR_BIT(M6811_BIT4); 
-
-	Ports[M6811_DDRC]   = 255;
-
-	Ports[M6811_PORTB]  = operation;
-	Ports[M6811_PORTCL] = operand;  
-	
-	Ports[M6811_PORTA] SET_BIT(M6811_BIT4); 
-	Ports[M6811_PORTA] CLR_BIT(M6811_BIT4); 
-       
-	do {  /* wait */ 
-		Ports[M6811_DDRC]  = 0; 
-		Ports[M6811_PORTB] = 1; 
-
-		Ports[M6811_PORTA] SET_BIT(M6811_BIT4);
-		Ports[M6811_PORTA] CLR_BIT(M6811_BIT4);
-	} while ((Ports[M6811_PORTC] & M6811_BIT7) == 1);
-
-	Ports[M6811_HPRIO] SET_BIT(M6811_BIT5); /* BIT5 = MDA */  
-}
+#include "os.h"
 
 void sys_print_lcd(char* text) {
-	int i;
-        unsigned int k;
+	unsigned int i = 0;
+    unsigned int k;
+	BOOL I; 
 	
-	sys_send_command_lcd(0,3); /* Clear The LCD?? */ 
-
-	for (k = 1; k != 0; k++); 
+	I = CheckInterruptMask(); 
+	if (!I) { OS_DI(); }
 	
-	for (i = 0; text[i] && i < MAX_CHAR_COUNT; i++) {
-		sys_send_command_lcd(2,text[i]);
-	}	
+	/* Return home */ 	
+	LCD_OPERATION = 0;
+	LCD_OPERAND   = 3;
+	LCD_EXECUTE(); 
+	
+	for (k = 30000; k !=0; k++);
+	
+	LCD_OPERATION = 2;
+	while (*text != 0 && i < MAX_CHAR_COUNT) {
+		LCD_OPERAND = *text;
+		LCD_EXECUTE(); 
+		text++;
+		i++;
+	}
+	
+	for (k = 30000; k !=0; k++);
+	
+	if (!I) { OS_EI(); }
 }
 
-void sys_init_lcd(void) {	
-	sys_send_command_lcd(0,15);
+void sys_clear_lcd() {
+	unsigned int i = 0;
+    unsigned int k;
+	BOOL I; 
+	
+	I = CheckInterruptMask(); 
+	if (!I) { OS_DI(); }
+	
+	/* Clear */ 	
+	LCD_OPERATION = 0;
+	LCD_OPERAND   = 1;
+	LCD_EXECUTE(); 
+	
+	for (k = 30000; k !=0; k++);
+	
+	if (!I) { OS_EI(); }
 }
 
-void _Main(void)
-{
-  char *ken  = "Ken!"; 
-  char *joey = "Joey";
-  unsigned int i;
-
-  sys_init_lcd();
-
-  while (1)
-  {
-    sys_print_lcd(ken);
-    for(i = 1; i != 0; i++);
-    for(i = 1; i != 0; i++);
-    for(i = 1; i != 0; i++);
-    for(i = 1; i != 0; i++);
-    sys_print_lcd(joey);
-    for(i = 1; i != 0; i++);
-    for(i = 1; i != 0; i++);
-    for(i = 1; i != 0; i++);
-    for(i = 1; i != 0; i++);
-  }	
-  return;
+static void _sys_send_command_lcd(void) {
+	__asm__ __volatile__ ("
+		ldx		#4096
+		bclr	0,X	#16
+		bclr	60,X	#32
+		bclr	0,X		#16
+		ldaa	#255
+		staa	7,X
+		ldaa	254
+		staa	4,X
+		ldab	255
+		stab	3,X
+		bset	0,X		#16
+		bclr	0,X		#16
+		clr		7,X
+wait:	ldaa	#1
+		staa	4,X
+		bset	0,X		#16
+		ldab	3,X
+		bclr	0,X		#16
+		andb	#128
+		beq		wait
+		
+Done:	bset	60,X	#32
+	" : : : "a","b","x","y","memory");
 }
 
+void _sys_init_lcd(void) {
+	BOOL I; 
+	
+	I = CheckInterruptMask(); 
+	if (!I) { OS_DI(); }
+	
+	void* sys_print_loc =  &_sys_send_command_lcd;
+	void* internal_mem = (void *)0x0020;
+	
+	for (; internal_mem < (void *) 0x00ff; internal_mem++, sys_print_loc++)
+		*(unsigned char *)(internal_mem) = *(unsigned char *)(sys_print_loc);
 
-/* main - simple reset vector initialization.
- * 
- * this is needed to work with the doanloader. Allows use of the
- * reset button when running in 'special test' mode
- *
- * @return values
- * int:  some ANSI spec requires a return from main 
- */
-int main(void) {
-	IV.Reset = _Main; /* register the reset handler */
-	while(1);         /* hang around */
-	return 0;	
+	LCD_OPERATION = 0;
+	LCD_OPERAND = 15;
+	LCD_EXECUTE(); 
+	
+	if (!I) { OS_EI(); }
 }
-

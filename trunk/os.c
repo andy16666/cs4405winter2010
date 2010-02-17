@@ -19,61 +19,61 @@
  * Please define user processes in user.h, user.c. 
  */
 
-#include "os.h"
+#include "os.h" 
+#include "lcd.h"           
 #include "ports.h"
 #include "process.h"
 #include "fifo.h" 
 #include "semaphore.h"
 #include "interrupts.h"
+#include "user.h"
 
-/* Processes */ 
-void PrintChar(void);	
-void PrintString(void);
-void PrintInit (void); 
-void PrintTime (void); 
-void PrintSystemTime (void);
-
-int main() {
+void Reset() {
 	unsigned int i; 
-	char *test = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"; 
-
+	
 	/* Set the timer prescale factor to 16 (1,1)...Must be set very soon after startup!!! */
 	Ports[M6811_TMSK2] SET_BIT(M6811_BIT0);
 	Ports[M6811_TMSK2] SET_BIT(M6811_BIT1);
 
 	/* Wait a few thousand cycles for the cpu timing to settle. */   
 	for (i = 1; i !=0; i++); 
-
+	
 	/* Mask any interrupts during booting. */ 
 	OS_DI(); 
 	
-
 	OS_Init();
 
-	PPPLen   = 2;
-	PPP[0]    = 10;
-	PPP[1]    = 15; 
-	PPPMax[0] = 2; 
-	PPPMax[1] = 2; 
-
+	PPPLen    = 4;
+	PPP[0]    = 15;
+	PPP[1]    = 10; 
+	PPP[2]    = 20; 
+	PPP[3]    = IDLE; 
+	PPPMax[0] = 10; 
+	PPPMax[1] = 10; 
+	PPPMax[2] = 10; 
+	PPPMax[3] = 10; 
 	
-	OS_InitSem(0,1);
-	OS_InitSem(1,1);
+	_sys_init_lcd(); 
+	sys_print_lcd("Start"); 
 
-	PrintInit(); 
-	OS_Create(PrintSystemTime,0,DEVICE,500);
-	OS_Create(PrintTime,0,DEVICE,10);
-	OS_Create(PrintString,(int)test,SPORADIC,10);
-	OS_Create(PrintString,(int)test,SPORADIC,10);
-	OS_Create(PrintString,(int)test,SPORADIC,10);
-	OS_Create(PrintString,(int)test,SPORADIC,10);
-	OS_Create(PrintString,(int)test,SPORADIC,10);
-	OS_Create(PrintString,(int)test,SPORADIC,10);
-	OS_Create(PrintString,(int)test,SPORADIC,10);
-	OS_DI(); 
+	/* user.h, user.c: define you processes here. */ 
+	ProcessInit(); 
 
 	OS_Start();
-	return 0; 
+}
+ 
+/* main - simple reset vector initialization.
+ * 
+ * this is needed to work with the doanloader. Allows use of the
+ * reset button when running in 'special test' mode
+ *
+ * @return values
+ * int:  some ANSI spec requires a return from main 
+ */
+int main(void) {
+	IVReset = Reset; 	/* register the reset handler */
+	while(1);			/* hang around */
+	return 0;	
 }
  
 /* Initialize the OS */
@@ -85,18 +85,17 @@ void OS_Init(void) {
 	ClockUpdate(); 
 
 	/* Enable TOI */ 
-	//IV.TOI = ClockUpdateHandler;
 	/* When the hardware pulse accumulator overflows, update the clock. (Causes intermittent crashes.) */ 
+	//IVTOI = ClockUpdateHandler;
+	//Ports[M6811_TFLG2] CLR_BIT(M6811_BIT7);
 	//Ports[M6811_TMSK2] SET_BIT(M6811_BIT7);	
 
-
-	DevP     = 0;
-	SpoP     = 0; 
-	PCurrent = 0; 
-
+	DevP       = 0;
+	SpoP       = 0; 
+	PCurrent   = 0; 
 	PKernel.SP = 0; 
 	
-	/* Initialize processes */ 
+	/* Initiaint ppp_next;     /* Queue index of the next periodic process. */ lize processes */ 
 	for (i = 0; i < MAXPROCESS; i++) {
 		P[i].pid = INVALIDPID; 
 		P[i].Prev = 0; 
@@ -119,21 +118,19 @@ void OS_Init(void) {
  
 /* Actually start the OS */
 void OS_Start(void) {
-	process *p; 
-	time_t t;         /* Time to interrupt. */ 
-	int ppp_next;     /* Queue index of the next periodic process. */ 
+	int ppp_next;   /* Queue index of the next periodic process. */ 
+	process *p; 	
+	time_t t;       /* Time to interrupt. */ 
+	
 
 	IVSWI = SwitchToProcess; 
-
 	ppp_next = 0; 
-
-	LastTime = Clock; 
 
 	/* Scheduler. */ 
 	while (1) {
 		/* Syncronize the software clock with the hardware clock. */ 
 		ClockUpdate(); 
-
+		
 		PCurrent = 0;
 		p = 0; 
 		t = 0;  
@@ -147,18 +144,20 @@ void OS_Start(void) {
 					break; 
 				}
 			} while ((p = p->Next) && (p != DevP)); 
-			
+
 			/* If a device process is ready, run it. */ 
 			if (PCurrent) {	
-				if (PCurrent->DevNextRunTime) {
-					PCurrent->DevNextRunTime += (time_t)(PCurrent->Name);
-				}
-				else {
+				/* Update the next time for the device process to run. */
+				if (PCurrent->state == NEW) {
 					PCurrent->DevNextRunTime = Clock + (time_t)(PCurrent->Name);
+				} 
+				else {
+					PCurrent->DevNextRunTime += (time_t)(PCurrent->Name);
 				}
 				ContextSwitchToProcess(); 
 				continue; 
 			}			
+
 			/* Find the time of the next device process, t. */ 
 			else {
 				p = DevP; 
@@ -170,43 +169,40 @@ void OS_Start(void) {
 				} 
 			}
 		}
-
-		/* No device processes to run now, to try for a periodic process. */ 
+		/* No device processes to run *now*, to try for a periodic process. */ 
 		if (PPPLen) {
 			/* Determine the time of the next interupt. */ 
-			if (!t || ((Clock+PPPMax[ppp_next]) <  t)) {
-				t = Clock+PPPMax[ppp_next]; 
+			if (!t || ((Clock + PPPMax[ppp_next]) <  t)) {
+				t = Clock + PPPMax[ppp_next]; 
 			}
+
 			/* If the process isn't idle, try to look it up. */ 
 			if (PPP[ppp_next] != IDLE) {
 				PCurrent = GetPeriodicProcessByName(PPP[ppp_next]); 	
 			}
 
-			/* Increment ppp_next circularly. */
 			circularIncrement(&ppp_next, PPPLen); 
 
 			/* If a periodic process is ready to run, run it. */ 
 			if (PCurrent) {
 				SetPreemptionTime(t);
-				ContextSwitchToProcess(); 
+				ContextSwitchToProcess();
 				continue; 
 			}
 		}
 
-		/* If we yet know when we have to come back, use MAX_EXECUTION_TIME. */ 
-		if (!t) { t = MAX_EXECUTION_TIME; /*ms*/ }
+		/* If we don't yet know when we have to come back, use MAX_EXECUTION_TIME. */ 
+		if (!t) { t = MAX_EXECUTION_TIME; }
 
-		/* We're here so we must be idle. Schedule a Sporatic Process. */ 
-		/* NOTE: Invalid periodic processes are treated as idle. */ 
-		if (SpoP) {
-			PCurrent = SpoP; 
-		} 
-		/* We're here so we must be idle and there must be no sporatic processes to run. */ 
+		/* We're here so we must be idle. Schedule a sporadic process. */ 
+		if (SpoP) { PCurrent = SpoP; } 
+		/* We're here so we must be idle and there must be no sporadic processes to run. */ 
 		else      { PCurrent = &IdleProcess; }
-
+		
+		/* Run sporasic of idle process. */ 	
 		SetPreemptionTime(t);	
 		ContextSwitchToProcess(); 
-		continue; 
+		continue;
 	} 
 }
  
@@ -217,9 +213,12 @@ void OS_Abort() {
 PID OS_Create(void (*f)(void), int arg, unsigned int level, unsigned int n) {	
 	process *p; 
 	int i; 
-	BOOL can_create; 
+	BOOL can_create;
+	BOOL I; 
 	
-	OS_DI(); 
+	I = CheckInterruptMask(); 
+	if (!I) { OS_DI(); }
+	
 	/* Find an available process control block */ 
 	can_create = FALSE; 
 	for (i = 0; i < MAXPROCESS; i++) { 
@@ -231,25 +230,25 @@ PID OS_Create(void (*f)(void), int arg, unsigned int level, unsigned int n) {
 		}
 	} 
 
-	/* If we run out of available process blocks, Abort. */ 
-	if (!can_create) { OS_Abort(); }
+	/* If we run out of available process blocks, return INVALIDPID. */ 
+	if (!can_create) { 
+		if (!I) { OS_EI(); }
+		return INVALIDPID; 
+	}
 
-	p->Name       = n; 
-	p->Level      = level;
-	p->Arg        = arg;
-	p->state      = NEW; 	
-
+	p->Name  = n; 
+	p->Level = level;
+	p->Arg   = arg;
+	p->state = NEW; 	
 	p->Next  = 0;
 	p->Prev  = 0;  
-
-	p->DevNextRunTime = 0; 
-
-	/* Set the initial program counter to the address of the function representing the process. */ 
+	p->DevNextRunTime   = 0; 
 	p->program_location = f;
 
 	AddToSchedulingQueue(p); 
 	
-	OS_EI(); 
+	if (!I) { OS_EI(); }
+	
 	return p->pid; 
 }
  
@@ -266,7 +265,7 @@ void OS_Terminate() {
 void OS_Yield() {
 	/* Move sporatic process to the end of the Queue */ 
 	if (PCurrent->Level == SPORADIC) { 
-		if (SpoP->Next) {
+		if (SpoP->Next) { 
 			SpoP = SpoP->Next; 
 		}
 	} 
@@ -275,147 +274,5 @@ void OS_Yield() {
 
 int OS_GetParam() {
 	return PCurrent->Arg; 
-}
-
-
-/* ########################################*/ 
-
-void PrintInit(void) {
-	static BOOL initialized = FALSE; 
-	if (!initialized) {
-		/* Configure the SCI to send at M6811_DEF_BAUD baud.  */
-		Ports[M6811_BAUD] = M6811_DEF_BAUD;
-
-		/* Setup character format 1 start, 8-bits, 1 stop.  */
-		Ports[M6811_SCCR1] = 0;
-
-		/* Enable receiver and transmitter.  */
-		Ports[M6811_SCCR2] = M6811_TE | M6811_RE;
-		
-		initialized = TRUE;
-	}
-}
-
-void PrintString (void) {
-	char *msg, *msgp;
-	FIFO f; 
-
-	msg = (char *)OS_GetParam(); 
-	msgp = msg; 
-
-	f = OS_InitFiFo(); 
-
-	OS_Wait(1); 
-	OS_Yield(); 	
-	OS_Create(PrintChar,(int)f,DEVICE,1);
-	while (*msgp) {
-		OS_Write(f,(int)(*msgp++)); 
-		OS_Yield(); 
-	}
-	OS_Write(f,0); 
-	OS_Signal(1); 
-	OS_Terminate(); 
-}
-
-void PrintChar (void) {
-	FIFO f; 
-	char c; 
-	int ic; 
-
-	f = (FIFO)OS_GetParam();
-
-	/* Listen for chars in the given FIFO and print them when they appear. */ 
-	while (1) {
-		while (OS_Read(f,&ic)) {
-			c = (char)ic;
-			if (!c) OS_Terminate(); 
-			OS_Wait(0); 	
-			while (!(Ports[M6811_SCSR] & M6811_TDRE))
-				continue;
-			Ports[M6811_SCDR] = c;
-			Ports[M6811_SCCR2] |= M6811_TE;
-			OS_Signal(0);
-		}
-		OS_Yield(); 
-	}
-}
-
-void PrintTime (void) { 
-	time_t time = 0; 
-	char *time_p; 
-	char *time_s = "00:00.00\r"; 
-
-	int cs; 
-	int s; 
-	int m; 
-	
-	
-	/* Listen for chars in the given FIFO and print them when they appear. */ 
-	while (1) {
-		cs = time % 100; 
-		s = (time/100) % 60; 
-		m = (time/100) / 60; 
-
-		time_s[7] = cs % 10 + '0';  
-		time_s[6] = cs / 10 + '0';  
-		time_s[4] = s % 10 + '0';  
-		time_s[3] = s / 10 + '0';  
-		time_s[1] = m % 10 + '0';  
-		time_s[0] = m / 10 + '0';  
-
-
-
-		OS_Wait(0); 
-		time_p = time_s; 
-		while (*time_p) {
-			while (!(Ports[M6811_SCSR] & M6811_TDRE))
-				continue;
-			Ports[M6811_SCDR] = *time_p++;
-			Ports[M6811_SCCR2] |= M6811_TE;
-		}
-		OS_Signal(0);
-
-		OS_Yield(); 			
-		time++; 
-	}
-}
-
-/* Specific to this implementation. */ 
-void PrintSystemTime (void) { 
-	unsigned long time = 0; 
-	char *time_p; 
-	char *time_s = "        S00:00\r"; 
-
-	int s; 
-	int m; 
-	
-	/* Listen for chars in the given FIFO and print them when they appear. */ 
-	while (1) {
-		OS_DI(); 	
-		time = Clock/1000; 
-		OS_EI(); 
-
-		s = time % 60; 
-		m = time / 60; 
-
-		time_s[4+9] = s % 10 + '0';  
-		time_s[3+9] = s / 10 + '0';  
-		time_s[1+9] = m % 10 + '0';  
-		time_s[0+9] = m / 10 + '0';  
-
-
-
-		OS_Wait(0); 	
-		time_p = time_s; 
-		while (*time_p) {
-			while (!(Ports[M6811_SCSR] & M6811_TDRE))
-				continue;
-			Ports[M6811_SCDR] = *time_p++;
-			Ports[M6811_SCCR2] |= M6811_TE;
-		}
-		OS_Signal(0);
-
-		OS_Yield(); 
-	}
 }
 

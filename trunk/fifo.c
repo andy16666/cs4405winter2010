@@ -15,7 +15,11 @@ fifo_t Fifos[MAXFIFO];
 FIFO OS_InitFiFo() {
 	int i;
 	FIFO id = INVALIDFIFO;
+	BOOL I; 
 	
+	I = CheckInterruptMask(); 
+	if (!I) { OS_DI(); }
+
 	for(i = 0; i < MAXFIFO; i++) {
 		if(INVALIDFIFO == Fifos[i].fid)	{
 			Fifos[i].fid       = id = i + 1;
@@ -25,15 +29,22 @@ FIFO OS_InitFiFo() {
 			break;
 		}
 	}
+	
+	if (!I) { OS_EI(); }
+
 	return id;
 }
 
 void OS_Write(FIFO f, int val) {	
 	fifo_t *fifo;
+	BOOL I; 
+	
 	
 	fifo = &Fifos[f];
 
-	OS_DI();
+	I = CheckInterruptMask(); 
+	if (!I) { OS_DI(); }
+	
 	fifo->elems[fifo->write] = val;
 	
 	/* Increment the write counter. */
@@ -42,23 +53,30 @@ void OS_Write(FIFO f, int val) {
 	if(fifo->nElems >= FIFOSIZE) { incrementFifoRead(fifo); }
 	else                         { fifo->nElems++; }
 
-	OS_EI();
+	if (!I) { OS_EI(); }
 }
 
 BOOL OS_Read(FIFO f, int *val) {
 	fifo_t *fifo = &Fifos[f];
+	BOOL I; 
+	
+
 	
 	/* If there is nothing in the FIFO, fail at reading */
 	if(0 == fifo->nElems) {
 		return FALSE;
 	}
 	
-	OS_DI();
+	I = CheckInterruptMask(); 
+	if (!I) { OS_DI(); }
+	
 	*val = fifo->elems[fifo->read];
 	/* Circularly increment the read position */	
 	incrementFifoRead(fifo);	
 	fifo->nElems--;	
-	OS_EI();
+	
+	if (!I) { OS_EI(); }
+	
 	return TRUE;
 }
 
