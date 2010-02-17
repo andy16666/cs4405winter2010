@@ -22,12 +22,6 @@ kernel  PKernel;
 
 time_t Clock;       /* Approximate time since system start in ms. */ 
 
-/* Accounting */ 
-time_t KTime = 0;     /* Total time spent in the kernel, including context switches to the kernel. */  
-time_t UTime = 0;     /* Total time spent in user processes including context switches to them. */ 
-time_t ITime = 0;     /* Total time spent running the idle process. */ 
-time_t LastTime = 0;  /* Temporary variable used in calculation. */ 
-
 void UnhandledInterrupt (void) { return; }  
 
 void Idle (void) { while (1); }
@@ -41,11 +35,6 @@ void circularIncrement(int *i, int max) {
 
 void ContextSwitchToKernel(void)  { 
         OS_DI(); 
-        ClockUpdate(); 
-        /* Store Accounting Information. */
-        if (PCurrent == &IdleProcess) { ITime += (Clock - LastTime); }
-        else                          { UTime += (Clock - LastTime); }  
-        LastTime = Clock; 
         /* Interrupt to a SwitchToProcess() or ReturnToKernel() ISRs. */ 
         asm volatile (" swi "); 
         /* This function returns when rti is called. */
@@ -53,9 +42,6 @@ void ContextSwitchToKernel(void)  {
 }
 
 void ContextSwitchToProcess(void) { 
-        ClockUpdate(); 
-        KTime += (Clock - LastTime);    
-        LastTime = Clock;       
         /* Interrupt to a SwitchToProcess() or ReturnToKernel() ISRs. */ 
         asm volatile (" swi "); 
         /* This function returns when rti is called. */
@@ -69,15 +55,17 @@ void SetPreemptionTimerInterval(unsigned int miliseconds) {
         unsigned int *TOC4_address; 
         unsigned int *timer_address; 
         
-        /* Make sure these are read as signel 16 bit numbers. */ 
+		/* Make sure these are read as signel 16 bit numbers. */ 
         TOC4_address  = (unsigned int*)&(Ports[M6811_TOC4_HIGH]);
         timer_address = (unsigned int*)&(Ports[M6811_TCNT_HIGH]);
-
+		
         /* Read the tick register, add a time to it, and store it in the OC4 compare register. */ 
         *TOC4_address = (*timer_address + (miliseconds * TIME_QUANTUM)); 
+		
         /* Set OL4 */ 
-        Ports[M6811_TCTL1] SET_BIT(M6811_BIT2);
-        /* Set OC4F */  
+        //Ports[M6811_TCTL1] SET_BIT(M6811_BIT2);
+		 
+		/* Set OC4F */  
         Ports[M6811_TFLG1] SET_BIT(M6811_BIT4);
         /* Unmask OC4 interrupt */
         Ports[M6811_TMSK1] SET_BIT(M6811_BIT4);
@@ -107,13 +95,10 @@ void ClockUpdate(void) {
 
         /* Check for TOF flag indicating an overflow condition. */ 
         if (Ports[M6811_TFLG2] & M6811_BIT7) {
-                /* Clear the overflow condition. */ 
+                elapsed_time = (0xFFFF - last_timer_value) + timer_value; 
                 Ports[M6811_TFLG2] CLR_BIT(M6811_BIT7);
         }
-
-        if (last_timer_value > timer_value) {
-                elapsed_time = (0xFFFF - last_timer_value) + timer_value; 
-        } else {
+		else {
                 elapsed_time = timer_value - last_timer_value;
         }
 
@@ -122,7 +107,7 @@ void ClockUpdate(void) {
 
         residual = elapsed_time % TIME_QUANTUM; 
 
-        Clock += (elapsed_time-residual)/TIME_QUANTUM; 
+        Clock += (elapsed_time-residual)/TIME_QUANTUM;
 
         /* Account for the residual during the next update. */ 
         last_timer_value = timer_value; 
@@ -220,8 +205,12 @@ void ReturnToKernel(void)  {
         /* Correct for function call. */
         PCurrent->SP++; 
         PCurrent->SP++;
-        /* Mask OC4 interrupts */
+        
+		/* Clear OC4 Flag */  
+        Ports[M6811_TFLG1] CLR_BIT(M6811_BIT4);
+		/* Mask OC4 interrupts */
         Ports[M6811_TMSK1] CLR_BIT(M6811_BIT4);
+		
         /* Reset interrupt handlers. */ 
         IVOC4 = UnhandledInterrupt; /* The kernel cannot be preempted. */ 
         IVSWI = SwitchToProcess; 
@@ -233,7 +222,7 @@ void ReturnToKernel(void)  {
 }
  
 void SwitchToProcess(void) {
-         /* Store the stack pointer in the given location. */ 
+        /* Store the stack pointer in the given location. */ 
         asm volatile (" sts %0 " : "=m" (PKernel.SP) : : "memory"); 
         /* Correct for function call. */
         PKernel.SP++; 
@@ -264,8 +253,22 @@ void SwitchToProcess(void) {
                 OS_Terminate(); 
         }
         else {
-                OS_Abort(); 
+				/* Something went wrong...we shouldn't be here...return to kernel. */ 
+                asm volatile (" lds %0 " : : "m" (PKernel.SP) : "memory"); 
+                asm volatile (" rti ");
         }
 }
 
-
+BOOL CheckInterruptMask () {
+	/* Non-zero if interrupts were previously masked. */ 
+	unsigned char CC; 
+	
+	asm volatile ("tpa \n\t staa %0 " : "=m" (CC) : : "a","memory"); 
+	
+	if (CC & M6811_BIT4) {
+		return TRUE; 
+	}
+	else {
+		return FALSE; 
+	}
+}
