@@ -34,17 +34,13 @@ void circularIncrement(int *i, int max) {
 }
 
 void ContextSwitchToKernel(void)  { 
-        OS_DI(); 
         /* Interrupt to a SwitchToProcess() or ReturnToKernel() ISRs. */ 
         asm volatile (" swi "); 
-        /* This function returns when rti is called. */
-        OS_EI();
 }
 
 void ContextSwitchToProcess(void) { 
         /* Interrupt to a SwitchToProcess() or ReturnToKernel() ISRs. */ 
         asm volatile (" swi "); 
-        /* This function returns when rti is called. */
 }
 
 void SetPreemptionTime(time_t time) {
@@ -64,7 +60,6 @@ void SetPreemptionTimerInterval(unsigned int miliseconds) {
 		
         /* Set OL4 */ 
         //Ports[M6811_TCTL1] SET_BIT(M6811_BIT2);
-		 
 		/* Set OC4F */  
         Ports[M6811_TFLG1] SET_BIT(M6811_BIT4);
         /* Unmask OC4 interrupt */
@@ -117,30 +112,37 @@ process *GetPeriodicProcessByName(unsigned int n) {
         int i; 
         process *p; 
         for (i = 0; i < MAXPROCESS; i++) {
-                p = &P[i]; 
-                if ((p->pid != INVALIDPID) 
-                && (p->Level == PERIODIC) 
-                && (p->Name == n)
-                && (PCurrent->state != WAITING) 
-                ) {
-                        return p; 
-                }               
+			p = &P[i]; 
+			if ((p->pid != INVALIDPID) 
+			&& (p->Level == PERIODIC) 
+			&& (p->Name == n) 
+			&& (p->state == READY || p->state == NEW)) {
+				return p; 
+			}
         }
         return 0; 
 }
 
 void AddToSchedulingQueue(process *p) {
         /* Add Sporatic Processes to the Sporatic Queue */ 
-        if (p->Level == SPORADIC) { SpoP = QueueAdd(p, SpoP); }
+        if (p->Level == SPORADIC) { 
+			SpoP = QueueAdd(p, SpoP); 
+		}
         /* Add Device Processes to the Device Queue */ 
-        if (p->Level == DEVICE)   { DevP = QueueAdd(p, DevP); }
+        if (p->Level == DEVICE)   { 
+			DevP = QueueAdd(p, DevP); 
+		}
 }
 
 void RemoveFromSchedulingQueue(process *p) {
         /* Remove the process from the SPORATIC queue */
-        if (p->Level == SPORADIC) { SpoP = QueueRemove(p, SpoP); } 
+        if (p->Level == SPORADIC) { 	
+			SpoP = QueueRemove(p, SpoP);
+		} 
         /* Remove the process from the DEVICE queue */
-        if (p->Level == DEVICE)   { DevP = QueueRemove(p, DevP); }
+        if (p->Level == DEVICE)   { 
+			DevP = QueueRemove(p, DevP); 
+		}
 }
 
 process *QueueAdd(process *p, process *Queue) {
@@ -176,30 +178,36 @@ process *QueueRemove(process *p, process *Queue) {
                 /* Queue points to the node to be removed. */ 
                 if (Queue == p) { 
                         /* There is more than one node */ 
-                        if (Queue->Next) { Queue = Queue->Next; }
+                        if (Queue->Next) { 
+							Queue = Queue->Next; 
+						}
                         /* There is only one node and it is the one to be removed. */ 
-                        else                  { return 0; }
+                        else { 
+							p->Next = 0; 
+							p->Prev = 0;
+							return 0; 
+						}
                 }
                 /* The graph has only two nodes  */ 
                 if (p->Prev == p->Next) {
                         Queue->Prev = 0; 
                         Queue->Next = 0;
+						p->Next = 0; 
+						p->Prev = 0;
                 }
                 /* The graph has more than two nodes. */ 
                 else {
                         p->Prev->Next = p->Next; 
                         p->Next->Prev = p->Prev; 
+						p->Next = 0; 
+						p->Prev = 0;
                 }
-        }
-        
-        p->Next = 0; 
-        p->Prev = 0;
- 
+        } 
         return Queue; 
 }
 
 void ReturnToKernel(void)  {
-        OS_DI();        
+        OS_DI();
         /* Store the stack pointer in the given location. */ 
         asm volatile (" sts %0 " : "=m" (PCurrent->SP) : : "memory"); 
         /* Correct for function call. */
@@ -253,9 +261,7 @@ void SwitchToProcess(void) {
                 OS_Terminate(); 
         }
         else {
-				/* Something went wrong...we shouldn't be here...return to kernel. */ 
-                asm volatile (" lds %0 " : : "m" (PKernel.SP) : "memory"); 
-                asm volatile (" rti ");
+				//sys_print_lcd((SpoP == PCurrent)?"           zero":"np"); 
         }
 }
 

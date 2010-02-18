@@ -15,8 +15,8 @@
 #define M6811_CPU_KHZ 2000
 #define TIME_QUANTUM (M6811_CPU_KHZ/16)
 
-/* Maximum time any non-device process can execute in ms. */ 
-#define MAX_EXECUTION_TIME 100
+/* Maximum time any sporadic or idle process can execute in ms. */ 
+#define MAX_EXECUTION_TIME 10
 
 #define NEW 0
 #define READY 1

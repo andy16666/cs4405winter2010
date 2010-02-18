@@ -7,7 +7,8 @@
 #define LCD_OPERAND	  *(volatile unsigned char *)(0xff)
 #define LCD_EXECUTE() __asm__ __volatile__ ("jsr 32" : : : "a","b","x","y","memory")
 
-void sys_print_lcd(char* text);
+
 void _sys_init_lcd();
+void sys_print_lcd(char* text);
 
 #endif
