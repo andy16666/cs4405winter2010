@@ -1,5 +1,5 @@
 /*
- * os.c
+ * os.c - JoelOS
  * Operating system. Designed for the Rug Warrior
  * robot with the 68HC11 CPU.
  *
@@ -28,9 +28,6 @@
 #include "interrupts.h"
 #include "user.h"
 
-char *temp = "          "; 
-
-
 int main(void) {
 	IVReset = Reset;
 	while(1);		
@@ -51,16 +48,6 @@ void Reset() {
 	OS_DI(); 
 	
 	OS_Init();
-
-	PPPLen    = 3;
-	PPP[0]    = 10;
-	PPP[1]    = 15; 
-	PPP[2]    = 20; 
-	//PPP[3]    = IDLE; 
-	PPPMax[0] = 10; 
-	PPPMax[1] = 10; 
-	PPPMax[2] = 10; 
-	//PPPMax[3] = 10; 
 	
 	/* user.h, user.c: define you processes there. */ 
 	ProcessInit(); 
@@ -75,12 +62,6 @@ void OS_Init(void) {
 	/* Initialize the clock */ 
 	Clock    = 0;	
 	ClockUpdate(); 
-
-	/* Enable TOI */ 
-	/* When the hardware pulse accumulator overflows, update the clock. (Causes intermittent crashes.) */ 
-	//IVTOI = ClockUpdateHandler;
-	//Ports[M6811_TFLG2] CLR_BIT(M6811_BIT7);
-	//Ports[M6811_TMSK2] SET_BIT(M6811_BIT7);	
 
 	DevP       = 0;
 	SpoP       = 0; 
@@ -186,7 +167,6 @@ void OS_Start(void) {
 				if (t < Clock) { continue; }
 				/* Otherwise fall through to schedule a sporadic process or idle time. */ 
 				else           { PCurrent = 0; }
-				//continue; 
 			}
 		}
 		

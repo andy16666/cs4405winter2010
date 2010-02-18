@@ -32,5 +32,3 @@ FIFOs are implemented in fifo.c and fifo.h
 Semaphores are implemented in semaphore.c and semaphore.h
 
 Memory regions are defined by memory.x. 
-
-
