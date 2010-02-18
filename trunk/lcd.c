@@ -7,13 +7,11 @@ void sys_print_lcd(char* text) {
 	BOOL I; 
 	
 	I = CheckInterruptMask(); 
-	if (!I) { OS_DI(); }
-	
+	OS_DI();
 	/* Return home */ 	
 	LCD_OPERATION = 0;
-	LCD_OPERAND   = 3;
+	LCD_OPERAND   = 1; 
 	LCD_EXECUTE(); 
-	
 	for (k = 30000; k !=0; k++);
 	
 	LCD_OPERATION = 2;
@@ -23,9 +21,7 @@ void sys_print_lcd(char* text) {
 		text++;
 		i++;
 	}
-	
 	for (k = 30000; k !=0; k++);
-	
 	if (!I) { OS_EI(); }
 }
 

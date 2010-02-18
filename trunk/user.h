@@ -1,14 +1,20 @@
+/*
+ * user.c
+ *
+ * Authors: 
+ * 	Joel Goguen <r1hh8@unb.ca>
+ *	Andrew Somerville <z19ar@unb.ca>	
+ */
 #ifndef __USER_H__
 #define __USER_H__
 
-/* Processes */ 
+
 void ProcessInit(void);	
 
-void PrintString(void);
-void PrintString2(void);
-void PrintInit (void); 
+/* Processes */ 
+void Write1(void);
+void WriteA(void);
+void PrintFIFO(void);
 void PrintTime (void); 
-void PrintSystemTime (void);
-void PrintSystemTime2 (void);
 
 #endif

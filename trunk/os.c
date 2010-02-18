@@ -28,6 +28,9 @@
 #include "interrupts.h"
 #include "user.h"
 
+char *temp = "          "; 
+
+
 int main(void) {
 	IVReset = Reset;
 	while(1);		
@@ -49,19 +52,16 @@ void Reset() {
 	
 	OS_Init();
 
-	PPPLen    = 4;
-	PPP[0]    = 15;
-	PPP[1]    = 10; 
+	PPPLen    = 3;
+	PPP[0]    = 10;
+	PPP[1]    = 15; 
 	PPP[2]    = 20; 
-	PPP[3]    = IDLE; 
+	//PPP[3]    = IDLE; 
 	PPPMax[0] = 10; 
 	PPPMax[1] = 10; 
 	PPPMax[2] = 10; 
-	PPPMax[3] = 10; 
+	//PPPMax[3] = 10; 
 	
-	_sys_init_lcd(); 
-	sys_print_lcd("Start"); 
-
 	/* user.h, user.c: define you processes there. */ 
 	ProcessInit(); 
 
@@ -147,7 +147,8 @@ void OS_Start(void) {
 				else {
 					PCurrent->DevNextRunTime += (time_t)(PCurrent->Name);
 				}
-				ContextSwitchToProcess(); 
+				
+				ContextSwitchToProcess(); 					
 				continue; 
 			}			
 			/* Find the time of the next device process, t. */ 
@@ -180,23 +181,26 @@ void OS_Start(void) {
 			if (PCurrent) {
 				SetPreemptionTime(t);
 				ContextSwitchToProcess();
-				ClockUpdate(); 
+				ClockUpdate();
 				/* If we used up our time slice, continue to the next process. */ 
 				if (t < Clock) { continue; }
 				/* Otherwise fall through to schedule a sporadic process or idle time. */ 
-				else           { Pcurrent = 0; }
+				else           { PCurrent = 0; }
+				//continue; 
 			}
 		}
-
+		
 		/* If we don't yet know when we have to come back, use MAX_EXECUTION_TIME. */ 
 		if (!t) { t = MAX_EXECUTION_TIME; }
-
-		/* We're here so we must be idle. Schedule a sporadic process. */ 
-		if (SpoP) { PCurrent = SpoP; } 
-		/* We're here so we must be idle and there must be no sporadic processes to run. */ 
-		else      { PCurrent = &IdleProcess; }
 		
-		/* Run sporasic or idle process. */ 	
+		/* We're here so we must be idle. Schedule a sporadic process. */ 
+		if (SpoP) { 
+			PCurrent = SpoP; 
+		} 
+		/* We're here so we must be idle and there must be no sporadic processes to run. */ 
+		else {
+			PCurrent = &IdleProcess; 
+		}
 		SetPreemptionTime(t);	
 		ContextSwitchToProcess(); 
 		continue;
@@ -249,15 +253,18 @@ void OS_Terminate() {
 	PCurrent->pid = INVALIDPID;
 
 	RemoveFromSchedulingQueue(PCurrent); 
-
+	
 	/* Return to the kernel without saving the context. */ 
 	ReturnToKernel(); 
 } 
 
 void OS_Yield() {
+	char *str = "         "; 
 	/* Move sporatic process to the end of the Queue */ 
-	if ((PCurrent->Level == SPORADIC) && (SpoP->Next)) { 
-		SpoP = SpoP->Next; 
+	if (PCurrent->Level == SPORADIC) {
+		if (SpoP && SpoP->Next) { 
+			SpoP = SpoP->Next; 
+		}
 	} 
 	ContextSwitchToKernel(); 
 }
