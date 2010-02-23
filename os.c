@@ -36,19 +36,19 @@ int main(void) {
 
 void Reset() {
 	unsigned int i; 
-	
+
 	/* Set the timer prescale factor to 16 (1,1)...Must be set very soon after startup!!! */
 	Ports[M6811_TMSK2] SET_BIT(M6811_BIT0);
 	Ports[M6811_TMSK2] SET_BIT(M6811_BIT1);
 
 	/* Wait a few thousand cycles for the cpu timing to settle. */   
 	for (i = 1; i !=0; i++); 
-	
+
 	/* Mask any interrupts during booting. */ 
 	OS_DI(); 
-	
+
 	OS_Init();
-	
+
 	/* user.h, user.c: define you processes there. */ 
 	ProcessInit(); 
 
@@ -67,7 +67,7 @@ void OS_Init(void) {
 	SpoP       = 0; 
 	PCurrent   = 0; 
 	PKernel.SP = 0; 
-	
+
 	/* Initialize processes */ 
 	for (i = 0; i < MAXPROCESS; i++) {
 		P[i].pid = INVALIDPID; 
@@ -81,7 +81,7 @@ void OS_Init(void) {
 	for (i = 0; i < MAXFIFO; i++) {
 		Fifos[i].fid = INVALIDFIFO; 
 	}
-	
+
 	/* Set up the idle process. */ 
 	IdleProcess.pid  = INVALIDPID; 
 	IdleProcess.Name = IDLE; 
@@ -96,7 +96,6 @@ void OS_Start(void) {
 	process *p; 	
 	time_t t;       /* Time to interrupt. */ 
 	
-
 	IVSWI = SwitchToProcess; 
 	ppp_next = 0; 
 
@@ -104,7 +103,7 @@ void OS_Start(void) {
 	while (1) {
 		/* Syncronize the software clock with the hardware clock. */ 
 		ClockUpdate(); 
-		
+	
 		PCurrent = 0;
 		p = 0; 
 		t = 0;  
@@ -128,7 +127,7 @@ void OS_Start(void) {
 				else {
 					PCurrent->DevNextRunTime += (time_t)(PCurrent->Name);
 				}
-				
+			
 				ContextSwitchToProcess(); 					
 				continue; 
 			}			
@@ -169,10 +168,10 @@ void OS_Start(void) {
 				else           { PCurrent = 0; }
 			}
 		}
-		
+	
 		/* If we don't yet know when we have to come back, use MAX_EXECUTION_TIME. */ 
 		if (!t) { t = MAX_EXECUTION_TIME; }
-		
+	
 		/* We're here so we must be idle. Schedule a sporadic process. */ 
 		if (SpoP) { 
 			PCurrent = SpoP; 
@@ -192,10 +191,10 @@ PID OS_Create(void (*f)(void), int arg, unsigned int level, unsigned int n) {
 	int i; 
 	BOOL can_create;
 	BOOL I; 
-	
+
 	I = CheckInterruptMask(); 
-	if (!I) { OS_DI(); }
-	
+	OS_DI(); 
+
 	/* Find an available process control block */ 
 	can_create = FALSE; 
 	for (i = 0; i < MAXPROCESS; i++) { 
@@ -223,7 +222,7 @@ PID OS_Create(void (*f)(void), int arg, unsigned int level, unsigned int n) {
 	p->program_location = f;
 
 	AddToSchedulingQueue(p); 
-	
+
 	if (!I) { OS_EI(); }
 	return p->pid; 
 }
@@ -239,12 +238,9 @@ void OS_Terminate() {
 } 
 
 void OS_Yield() {
-	char *str = "         "; 
 	/* Move sporatic process to the end of the Queue */ 
-	if (PCurrent->Level == SPORADIC) {
-		if (SpoP && SpoP->Next) { 
+	if ((PCurrent->Level == SPORADIC) && SpoP && SpoP->Next) { 
 			SpoP = SpoP->Next; 
-		}
 	} 
 	ContextSwitchToKernel(); 
 }
@@ -253,7 +249,5 @@ int OS_GetParam() {
 	return PCurrent->Arg; 
 }
 
-void OS_Abort() {
-	asm(" stop "); 
-}
+void OS_Abort() { asm(" stop "); }
 

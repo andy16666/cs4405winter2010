@@ -10,6 +10,7 @@
 #define __PORTS_H__
  
 #define PORT_BASE 	0x1000
+
 /* Can be used as an array to access ports. */
 #define Ports ((volatile unsigned char *)(PORT_BASE))
 
@@ -27,19 +28,49 @@
 #define M6811_BIT1	0x02
 #define M6811_BIT0	0x01
 
-/* Part 1:  68HC11 Definitions. */
-#define M6811_PORTA	0x00
 
+
+/* Part 1:  68HC11 Definitions. */
+#define M6811_PORTA	0x00	
+/* PORT A: 
+	7: PA7/PAI/OC1
+	6: PA6/OC2/OC1
+	5: PA5/OC3/OC1
+	4: PA4/OC4/OC1 - 
+	3: PA3/OC5/OC1 - Toggle at different rates to produce a tone on the speaker. 
+ 	2: PA2/IC1
+	1: PA1/IC2
+  	0: PA0/IC3 
+*/
 #define M6811_PIOC	0x02    /* STAF:STAI:CWOM:HNDS:OIN:PLS:EGA:INVB */
 #define M6811_PORTC	0x03
 #define M6811_PORTB	0x04
 #define M6811_PORTCL	0x05
+#define M6811_DDRC	0x07	/* Data directions for port C */ 
+#define M6811_PORTD	0x08	
+#define M6811_DDRD	0x09 	/* Data directions for port D */ 
+/* PORT D: 
+	7: PD5/SSbar
+	6: PD4/SCK  - 
+	5: PD3/MOSI - Right infared emitter, on/off 
+	4: PD2/MISO - Left infared emitter, on/off
+	
+	1: PD1/TxD
+	0: PD0/RxD
 
-#define M6811_DDRC	0x07
-#define M6811_PORTD	0x08
-#define M6811_DDRD	0x09
+*/ 
+
 #define M6811_PORTE	0x0A
-
+/* 
+	7: PE7
+	6: PE6
+	5: PE5 - 
+	4: PE4 - Infared detector
+	3: PE3 - Bumpers 
+	2: PE2 - Microphone
+	1: PE1 - Right photo cell
+	0: PE0 - Left photo cell
+*/ 
 
 
 /* Timing */ 
@@ -79,7 +110,10 @@ TOI: Enable interrupt on overflow.
 TOF: Overflow has occurred.  	
 */
 
-#define M6811_OPTION	0x39    /* ADPU:CSEL:IRQE;DLY:CME:0:CR1:CR0 */ 
+#define M6811_ADCTL	0x30    /* CCF:-:SCAN:MULTI:CD:CC:CB:CA */ 
+
+
+#define M6811_OPTION	0x39    /* ADPU:CSEL:IRQE:DLY:CME:0:CR1:CR0 */ 
 
 
 /* Part 1:  68HC11 Definitions. */
