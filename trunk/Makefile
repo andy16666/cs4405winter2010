@@ -4,7 +4,7 @@ CC = m6811-elf-gcc
 OBJCOPY = m6811-elf-objcopy
 
 CPPFLAGS = 
-CFLAGS = -O -mshort -msoft-reg-count=0
+CFLAGS = $(DBGFLAGS) -O -mshort -msoft-reg-count=0
 DBGFLAGS = -g
 LDFLAGS = -Wl,-m,m68hc11elfb
 
@@ -19,7 +19,7 @@ all: $(BINFILE) $(S19FILE)
 
 $(BINFILE): $(OBJECTS)
 	@echo 'Building $@'
-	$(CC) $(DBGFLAGS) $(CFLAGS) $(LDFLAGS) $+ -o $@
+	$(CC) $(CFLAGS) $(LDFLAGS) $+ -o $@
 
 $(S19FILE): $(BINFILE)
 	@echo 'Building $@'
