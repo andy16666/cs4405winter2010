@@ -44,30 +44,30 @@ void sys_clear_lcd() {
 }
 
 static void _sys_send_command_lcd(void) {
-	__asm__ __volatile__ ("
-		ldx		#4096
-		bclr	0,X	#16
-		bclr	60,X	#32
-		bclr	0,X		#16
-		ldaa	#255
-		staa	7,X
-		ldaa	254
-		staa	4,X
-		ldab	255
-		stab	3,X
-		bset	0,X		#16
-		bclr	0,X		#16
-		clr		7,X
-wait:	ldaa	#1
-		staa	4,X
-		bset	0,X		#16
-		ldab	3,X
-		bclr	0,X		#16
-		andb	#128
-		beq		wait
+	__asm__ __volatile__ (
+		"ldx	#4096\n\t"
+		"bclr	0,X	#16\n\t"
+		"bclr	60,X	#32\n\t"
+		"bclr	0,X	#16\n\t"
+		"ldaa	#255\n\t"
+		"staa	7,X\n\t"
+		"ldaa	254\n\t"
+		"staa	4,X\n\t"
+		"ldab	255\n\t"
+		"stab	3,X\n\t"
+		"bset	0,X	#16\n\t"
+		"bclr	0,X	#16\n\t"
+		"clr	7,X\n\t"
+"wait:	ldaa	#1\n\t"
+		"staa	4,X\n\t"
+		"bset	0,X	#16\n\t"
+		"ldab	3,X\n\t"
+		"bclr	0,X	#16\n\t"
+		"andb	#128\n\t"
+		"beq	wait\n\t"
 		
-Done:	bset	60,X	#32
-	" : : : "a","b","x","y","memory");
+"Done:	bset	60,X	#32"
+	 : : : "a","b","x","y","memory");
 }
 
 void _sys_init_lcd(void) {
