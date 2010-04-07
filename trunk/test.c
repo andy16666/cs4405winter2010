@@ -42,28 +42,36 @@ void TestMain(void) {
 	OS_InitSem(S_LCD,1);
 	
 	/* Prints the operating system name and plays SOS though the speaker. */ 
+	OS_Wait(S_BUZZ_OUTPUT); 
 	OS_Create(PrintLogo, 0, DEVICE, 800); 
+	OS_Yield(); 
 	
-	
+	OS_Wait(S_BUZZ_OUTPUT);
 	/* Servers */ 
-	OS_Create(FIFOBuzz, buzz, DEVICE, 800);         /* Beep in morse code, charactars from fifo. */ 
-	OS_Create(ReadLightSensors, buzz, DEVICE, 200); /* Write values representing the light sensors into the fifo */ 
-	OS_Create(ReadMicrophone,   buzz, DEVICE, 500); /* Write values representing the light sensors into the fifo */ 	
-	OS_Create(ReadBumpers, lcd, DEVICE, 10);       /* Reads bumper values into a FIFO, and moves the robot accordingly. */ 
+	OS_Create(FIFOBuzz, buzz, DEVICE, 800);           /* Beep in morse code, charactars from fifo. */ 
+	OS_Create(ReadLightSensors, buzz, DEVICE, 200);   /* Write values representing the light sensors into the fifo */ 
+	OS_Create(ReadMicrophone,   buzz, DEVICE, 500);   /* Write values representing the sound level into the fifo */ 	
+	OS_Create(ReadBumpers, lcd, DEVICE, 10);          /* Reads bumper values into a FIFO, and moves the robot accordingly. */ 
+	/* Printing is too slow... */ 
 	//OS_Create(PrintBumperValue, lcd, PERIODIC, 40); /* Prints the bumper values to the screen. */ 
+	OS_Signal(S_BUZZ_OUTPUT);
 }
 
 
 /* 
 Device: 
 	Scheduling period = 1/frequency of sound. 
-	Parameter = number of oscillations to produce. 
+	Parameter (l) = number of oscillations to produce. 
 */ 
 void Buzz(void) { 
 	int i,l; 
 	
 	l = OS_GetParam(); 
 	
+	/* 
+		Release the cpu each time the speaker bit is 
+		altered, to allow the device process period to determine the frequency. 
+	*/ 
 	for(i = 0; i < l; i++) {	
 		Ports[M6811_PORTA] SET_BIT(BIT3); 
 		OS_Yield(); 
@@ -79,11 +87,13 @@ inline void dot()  { OS_Wait(S_BUZZ); OS_Create(Buzz,  8,  DEVICE, 11); }
 void FIFOBuzz(void) {
 	FIFO f;
 	int fi; 
+	unsigned int i; 
 
 	f = (FIFO)OS_GetParam(); 
 	
 	while (1) {
 		if(OS_Read(f,&fi)) {
+			/* Fifo for charactar output */
 			OS_Wait(S_BUZZ_OUTPUT); 
 			switch((char)fi) {
 				case 'a': dot(); dash(); break; 
@@ -125,8 +135,9 @@ void FIFOBuzz(void) {
 				default: OS_Yield(); break; 
 			}
 			OS_Signal(S_BUZZ_FIFO); 
+			/* Wait for the speaker to settle...prevents the microphone from hearing it. */ 
 			OS_Yield();
-			/* When all buzz processes have finished, indicate signal that output is complete. */ 
+			/* When all buzz processes have finished, signal that output is complete. */ 
 			OS_Wait(S_BUZZ); 
 			OS_Signal(S_BUZZ_OUTPUT); 
 			OS_Signal(S_BUZZ); 
@@ -163,6 +174,7 @@ void ReadLightSensors(void) {
 			OS_Yield(); 
 		}
 		l = Ports[M6811_ADR1];	
+		OS_Signal(S_PORTE); 
 		
 		if (l > 100) {
 			OS_Wait(S_BUZZ_FIFO);
@@ -174,7 +186,7 @@ void ReadLightSensors(void) {
 			OS_Write(f,'r'); 
 		}
 		
-		OS_Signal(S_PORTE); 
+		
 		OS_Yield();
 	}
 }
@@ -185,12 +197,12 @@ void ReadMicrophone(void) {
 	
 	while (1) {
 		s = 0; 
+		
 		OS_Wait(S_PORTE); 
 		/* Activate A/D Converter...makes pins on Port E analog. */ 
 		Ports[M6811_OPTION] SET_BIT(BIT7); 
 		/* Delay at least 100 microseconds */ 
 		OS_Yield(); 
-		
 		/* Don't listen while buzzing. */ 
 		OS_Wait(S_BUZZ_OUTPUT);
 		/* Start converting the microphone. */ 
@@ -201,21 +213,18 @@ void ReadMicrophone(void) {
 			OS_Yield(); 
 		}
 		s = Ports[M6811_ADR1]; 
+		OS_Signal(S_PORTE); 
 		
-		
-		if (s >= 128) {
-			s -= 128; 
-		}
-		else {
-			s = 128 - s; 
-		}
+		/* Rectify the sound sample around 128. */ 
+		if (s >= 128) { s -= 128; }
+		else          { s = 128 - s; }
 		
 		if (s > 35) {
 			OS_Wait(S_BUZZ_FIFO);
 			OS_Write(f,'s'); 
 		}
 		
-		OS_Signal(S_PORTE); 
+		
 		OS_Yield();
 	}
 }
@@ -238,9 +247,12 @@ void ReadBumpers(void) {
 			OS_Yield(); 
 		}
 		b = Ports[M6811_ADR1]; 
-		
 		OS_Signal(S_PORTE); 
 	
+		/* 
+			Move based on the bumper values. (b)
+		*/ 
+		/* Turn Left */ 
 		if (b > 3 && b < 7) {
 			Ports[M6811_DDRD]  = 0xFF;
 			Ports[M6811_PORTD] CLR_BIT(BIT5); // Reverse Right 			
@@ -248,8 +260,9 @@ void ReadBumpers(void) {
 			Ports[M6811_PORTA] CLR_BIT(BIT6); // Left
 			Ports[M6811_PORTA] SET_BIT(BIT5); // Right
 			
-			OS_Write(f,1); 
+			//OS_Write(f,1); 
 		}
+		/* Turn Right */ 
 		else if (b > 23 && b < 26) {
 			Ports[M6811_DDRD]  = 0xFF;
 			Ports[M6811_PORTD] CLR_BIT(BIT4); // Reverse Left
@@ -257,8 +270,9 @@ void ReadBumpers(void) {
 			Ports[M6811_PORTA] SET_BIT(BIT6); // Left
 			Ports[M6811_PORTA] CLR_BIT(BIT5); // Right
 
-			OS_Write(f,2); 
+			//OS_Write(f,2); 
 		}
+		/* Move Ahead */ 
 		else if (b > 67 && b < 70) {
 			Ports[M6811_DDRD]  = 0xFF;
 			Ports[M6811_PORTD] = 0xFF; // Forward
@@ -266,15 +280,15 @@ void ReadBumpers(void) {
 			Ports[M6811_PORTA] SET_BIT(BIT6); // Left
 			Ports[M6811_PORTA] SET_BIT(BIT5); // Right
 						
-			OS_Write(f,3); 
+			//OS_Write(f,3); 
 		}
+		/* Stop */ 
 		else {
 			Ports[M6811_PORTA] CLR_BIT(BIT6); 
 			Ports[M6811_PORTA] CLR_BIT(BIT5); 
 		
-			OS_Write(f,4);  
+			//OS_Write(f,4);  
 		}
-	
 		OS_Yield();
 	}
 }
@@ -289,7 +303,7 @@ void PrintString (void) {
 }
 
 
-void PrintBumperValue(void) {
+/*void PrintBumperValue(void) {
 	FIFO f = (FIFO)OS_GetParam(); 
 	int state, last; 
 	
@@ -319,7 +333,7 @@ void PrintBumperValue(void) {
 		
 		last = state; 	
 	}
-}
+}*/ 
 
 
 
@@ -331,12 +345,13 @@ void PrintLogo(void) {
 	OS_InitSem(S_LOGO,1); 
 	f = OS_InitFiFo(); 
 
+	/* Print JoelOS in a convoluted way. */ 
 	OS_Wait(S_LOGO); 
 	OS_Create(WriteA,    (int)f, PERIODIC, 10);
 	OS_Create(Write1,    (int)f, PERIODIC, 20);
 	OS_Create(PrintFIFO, (int)f, PERIODIC, 30);
 	
-	OS_Wait(S_BUZZ_OUTPUT);
+	/* Buzz SOS */ 
 	dot();
 	dot(); 
 	dot();
@@ -390,4 +405,3 @@ void WriteA (void) {
 	OS_Write(f,(int)'e'); 
 	OS_Signal(S_LOGO); 
 }
-

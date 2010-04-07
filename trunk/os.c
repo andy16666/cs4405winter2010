@@ -7,7 +7,7 @@
  *	Joel Goguen <r1hh8@unb.ca>
  *	Andrew Somerville <z19ar@unb.ca>
  * 
- * Build using supplied make.bat. Number of soft registers must be set to 0. 
+ * Build using supplied make.bat. (Number of soft registers must be set to 0.) 
  *
  * Process management functions and definitions: 
  *   process.h, process.c
@@ -41,7 +41,7 @@ void Reset() {
 	Ports[M6811_TMSK2] SET_BIT(M6811_BIT0);
 	Ports[M6811_TMSK2] SET_BIT(M6811_BIT1);
 
-	/* Wait a few thousand cycles for the cpu timing to settle. */   
+	/* Wait a few thousand cycles for the CPU timing to settle. */   
 	for (i = 1; i !=0; i++); 
 
 	/* Mask any interrupts during booting. */ 
