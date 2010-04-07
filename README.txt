@@ -4,6 +4,9 @@ This operating system is designed for the Rug Warrior robot running the
 For defining of user processes, we have provided user.c and user.h.
 Initial processes creation can be done via ProcessInit() in user.c.
 
+For the test suite, user.c and user.h have been superceded by test.c 
+and test.h. 
+
 A make.bat file is included. Use this file to build the operating system
 and create os.elf and os.s19. The compiler tools are expected to be on the
 executable path. On Windows, if the compiler is not already on the path,
