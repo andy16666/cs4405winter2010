@@ -27,15 +27,23 @@
 #define M6811_BIT2	0x04	
 #define M6811_BIT1	0x02
 #define M6811_BIT0	0x01
-
+/* Bit Masks */
+#define BIT7	0x80
+#define BIT6	0x40	
+#define BIT5	0x20	
+#define BIT4	0x10
+#define BIT3	0x08
+#define BIT2	0x04	
+#define BIT1	0x02
+#define BIT0	0x01
 
 
 /* Part 1:  68HC11 Definitions. */
 #define M6811_PORTA	0x00	
 /* PORT A: 
 	7: PA7/PAI/OC1
-	6: PA6/OC2/OC1
-	5: PA5/OC3/OC1
+	6: PA6/OC2/OC1 - Left motor enable. 
+	5: PA5/OC3/OC1 - Right motor enable. 
 	4: PA4/OC4/OC1 - 
 	3: PA3/OC5/OC1 - Toggle at different rates to produce a tone on the speaker. 
  	2: PA2/IC1
@@ -50,8 +58,8 @@
 #define M6811_PORTD	0x08	
 #define M6811_DDRD	0x09 	/* Data directions for port D */ 
 /* PORT D: 
-	7: PD5/SSbar
-	6: PD4/SCK  - 
+	7: PD5/SSbar - Right motor F/R
+	6: PD4/SCK   - Left motor F/R
 	5: PD3/MOSI - Right infared emitter, on/off 
 	4: PD2/MISO - Left infared emitter, on/off
 	
@@ -68,8 +76,8 @@
 	4: PE4 - Infared detector
 	3: PE3 - Bumpers 
 	2: PE2 - Microphone
-	1: PE1 - Right photo cell
-	0: PE0 - Left photo cell
+	1: PE1 - Left photo cell
+	0: PE0 - Right photo cell
 */ 
 
 
@@ -111,7 +119,10 @@ TOF: Overflow has occurred.
 */
 
 #define M6811_ADCTL	0x30    /* CCF:-:SCAN:MULTI:CD:CC:CB:CA */ 
-
+#define M6811_ADR1	0x31
+#define M6811_ADR2	0x32
+#define M6811_ADR3	0x33
+#define M6811_ADR4	0x34
 
 #define M6811_OPTION	0x39    /* ADPU:CSEL:IRQE:DLY:CME:0:CR1:CR0 */ 
 

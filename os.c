@@ -26,7 +26,7 @@
 #include "fifo.h" 
 #include "semaphore.h"
 #include "interrupts.h"
-#include "user.h"
+#include "test.h"
 
 int main(void) {
 	IVReset = Reset;
